@@ -1,0 +1,33 @@
+{
+  "name": "@practica/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "index": "tsx src/cli/index-documents.ts",
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/static": "^10.1.2",
+    "@napi-rs/canvas": "^0.1.65",
+    "@practica/shared": "*",
+    "chokidar": "^4.0.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.2.0",
+    "pdfjs-dist": "^4.10.38",
+    "pg": "^8.13.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
