@@ -16,6 +16,9 @@ RUN npm run build -w frontend
 
 FROM node:22-bookworm-slim
 
+# ffmpeg e necesar pentru extragerea cadrelor din video (.mp4)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=build /app/package.json /app/package-lock.json ./

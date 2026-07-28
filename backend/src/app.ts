@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { ChatStreamEvent, DocumentSummary, IndexStatus } from '@practica/shared';
 import { config } from './config.js';
@@ -89,9 +90,27 @@ export async function buildServer(): Promise<FastifyInstance> {
     }));
   });
 
-  app.post('/api/admin/reindex', async () => {
-    void scanAll();
-    return { started: true };
+  app.post<{ Body: { force?: boolean } }>('/api/admin/reindex', async (req) => {
+    const force = req.body?.force === true;
+    void scanAll(force);
+    return { started: true, force };
+  });
+
+  // Servește imaginile extrase din documente (capturi de ecran, cadre video).
+  app.get<{ Params: { id: string } }>('/api/media/:id', async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id invalid' });
+    const { rows } = await pool.query<{ file_path: string; mime: string }>(
+      `SELECT file_path, mime FROM media WHERE id = $1`,
+      [id]
+    );
+    if (!rows.length) return reply.code(404).send({ error: 'Imaginea nu există' });
+    try {
+      const data = await readFile(resolve(config.mediaDir, rows[0].file_path));
+      return reply.type(rows[0].mime).header('Cache-Control', 'public, max-age=86400').send(data);
+    } catch {
+      return reply.code(404).send({ error: 'Fișierul imaginii lipsește de pe disc' });
+    }
   });
 
   // === Conversații ===

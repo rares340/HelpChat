@@ -5,12 +5,14 @@ services:
       - "3001:3001"
     env_file: .env
     environment:
-      # Folderul PDF este montat ca volum; suprascrie valoarea din .env.
+      # Folderele montate ca volume; suprascriu valorile din .env.
       PDF_DIR: /app/documents
+      MEDIA_DIR: /app/media
       # Pentru profilul localdb decomentează linia de mai jos (sau schimb-o în .env):
       # DATABASE_URL: postgresql://indeco:practica2026@db:5432/model
     volumes:
       - ./documents:/app/documents
+      - ./media:/app/media
     restart: unless-stopped
 
   # Pornit doar cu: docker compose --profile localdb up

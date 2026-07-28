@@ -56,6 +56,7 @@ export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator
       messages,
       stream: true,
       keep_alive: config.OLLAMA_KEEP_ALIVE,
+      options: { temperature: config.CHAT_TEMPERATURE },
     }),
     signal: AbortSignal.timeout(config.OLLAMA_TIMEOUT_MS),
   });
@@ -90,6 +91,7 @@ export async function chat(messages: OllamaChatMessage[]): Promise<string> {
     messages,
     stream: false,
     keep_alive: config.OLLAMA_KEEP_ALIVE,
+    options: { temperature: config.CHAT_TEMPERATURE },
   });
   return data.message.content;
 }
@@ -106,6 +108,25 @@ export async function ocrImage(imageBase64: string): Promise<string> {
   return data.response;
 }
 
+/** Descrie un cadru dintr-o înregistrare de ecran cu modelul vision (pe .55). */
+export async function describeFrame(imageBase64: string): Promise<string> {
+  const data = await postJson<{ response: string }>(`${config.OLLAMA_URL_VISION}/api/generate`, {
+    model: config.VISION_MODEL,
+    prompt:
+      'Aceasta este o captură dintr-o înregistrare de ecran a unei aplicații software. ' +
+      'Descrie concis, în română: 1) ce ecran/modul este afișat; 2) ce acțiune pare să se execute; ' +
+      '3) transcrie textul important vizibil (titluri, câmpuri, butoane, mesaje, valori). ' +
+      'Maxim 150 de cuvinte. Fii precis, nu inventa.',
+    images: [imageBase64],
+    stream: false,
+    keep_alive: config.OLLAMA_KEEP_ALIVE,
+    // Fără num_predict: qwen3-vl e model thinking — un plafon mic e consumat
+    // integral de raționamentul intern și răspunsul iese gol (done_reason: length).
+    options: { temperature: 0.1 },
+  });
+  return data.response;
+}
+
 /** Verifică la pornire că serverele răspund și modelele configurate există. */
 export async function checkOllama(): Promise<{ ok: boolean; problems: string[] }> {
   const problems: string[] = [];
@@ -113,6 +134,7 @@ export async function checkOllama(): Promise<{ ok: boolean; problems: string[] }
     [config.OLLAMA_URL_CHAT, config.CHAT_MODEL],
     [config.OLLAMA_URL_EMBED, config.EMBED_MODEL],
     [config.OLLAMA_URL_OCR, config.OCR_MODEL],
+    [config.OLLAMA_URL_VISION, config.VISION_MODEL],
   ];
   for (const [url, model] of targets) {
     try {

@@ -3,6 +3,22 @@ import ReactMarkdown from 'react-markdown';
 import type { ChatMessage, Citation, Conversation } from '@practica/shared';
 import { api, streamChat } from '../api/client';
 
+function mmss(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+}
+
+/** .docx nu are paginare fixă — afișăm doar fișierul; la video afișăm minutul. */
+function formatRef(c: Citation): string {
+  const lower = c.relPath.toLowerCase();
+  if (lower.endsWith('.docx')) return c.relPath;
+  if (lower.endsWith('.mp4')) {
+    const range = c.pageStart === c.pageEnd ? `min. ${mmss(c.pageStart)}` : `min. ${mmss(c.pageStart)}–${mmss(c.pageEnd)}`;
+    return `${c.relPath} · ${range}`;
+  }
+  const pages = c.pageStart === c.pageEnd ? `pag. ${c.pageStart}` : `pag. ${c.pageStart}–${c.pageEnd}`;
+  return `${c.relPath} · ${pages}`;
+}
+
 interface DraftMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -133,12 +149,25 @@ export function ChatPage() {
                             key={c.label}
                             className="citation-chip"
                             onClick={() => setOpenCitation(openCitation?.chunkId === c.chunkId ? null : c)}
-                            title={`${c.relPath}, pag. ${c.pageStart}`}
+                            title={formatRef(c)}
                           >
-                            [{c.label}] {c.relPath} · pag. {c.pageStart === c.pageEnd ? c.pageStart : `${c.pageStart}–${c.pageEnd}`}
+                            [{c.label}] {formatRef(c)}
                             {c.source === 'ocr' && <span className="ocr-badge">OCR</span>}
+                            {c.source === 'video' && <span className="ocr-badge">VIDEO</span>}
+                            {c.media.length > 0 && <span className="ocr-badge media-badge">📷 {c.media.length}</span>}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {m.citations.some((c) => c.media.length > 0) && (
+                      <div className="media-strip">
+                        {m.citations
+                          .flatMap((c) => c.media.map((img) => ({ ...img, label: c.label, ref: formatRef(c) })))
+                          .map((img) => (
+                            <a key={img.id} href={img.url} target="_blank" rel="noreferrer" title={`[${img.label}] ${img.ref}`}>
+                              <img src={img.url} alt={`Captură din [${img.label}] ${img.ref}`} loading="lazy" />
+                            </a>
+                          ))}
                       </div>
                     )}
                   </>
@@ -155,16 +184,22 @@ export function ChatPage() {
           <div className="citation-panel">
             <div className="citation-panel-header">
               <strong>
-                [{openCitation.label}] {openCitation.relPath} — pag.{' '}
-                {openCitation.pageStart === openCitation.pageEnd
-                  ? openCitation.pageStart
-                  : `${openCitation.pageStart}–${openCitation.pageEnd}`}
+                [{openCitation.label}] {formatRef(openCitation)}
               </strong>
               <button className="icon-btn" onClick={() => setOpenCitation(null)}>
                 ✕
               </button>
             </div>
             <blockquote>{openCitation.snippet}</blockquote>
+            {openCitation.media.length > 0 && (
+              <div className="media-strip">
+                {openCitation.media.map((img) => (
+                  <a key={img.id} href={img.url} target="_blank" rel="noreferrer">
+                    <img src={img.url} alt={`Captură din ${openCitation.relPath}`} loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

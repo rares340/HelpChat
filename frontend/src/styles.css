@@ -84,6 +84,17 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   border-radius: 4px; background: #fff3d6; color: var(--warn);
 }
 
+.media-strip {
+  margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;
+}
+.media-strip img {
+  height: 120px; max-width: 260px; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--border); background: #fff; cursor: zoom-in;
+  transition: transform 0.12s ease;
+}
+.media-strip img:hover { transform: scale(1.03); }
+.media-badge { background: var(--accent-soft); color: var(--accent); }
+
 .citation-panel {
   border-top: 1px solid var(--border); background: var(--surface);
   padding: 12px 24px; max-height: 220px; overflow-y: auto; font-size: 13.5px;

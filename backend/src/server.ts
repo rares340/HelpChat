@@ -1,5 +1,6 @@
 import { buildServer } from './app.js';
 import { config } from './config.js';
+import { pool } from './db/pool.js';
 import { healthCheck } from './services/health.js';
 import { startWatcher } from './services/watcher.js';
 
@@ -16,6 +17,13 @@ if (!health.ok) {
 }
 
 if (health.db.ok) {
+  // Versiunile rămase în 'indexing' sunt resturi ale unei porniri întrerupte.
+  const { rows } = await pool.query<{ id: number }>(
+    `DELETE FROM document_versions WHERE status = 'indexing' RETURNING id`
+  );
+  if (rows.length) {
+    console.warn(`⚠ Am curățat ${rows.length} versiuni rămase în lucru dintr-o rulare întreruptă.`);
+  }
   startWatcher();
 }
 

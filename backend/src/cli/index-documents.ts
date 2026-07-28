@@ -1,7 +1,9 @@
 import { scanAll } from '../services/indexer.js';
 import { pool } from '../db/pool.js';
 
-const result = await scanAll();
+// npm run index -- --force  → reindexează tot, ignorând hash-urile
+const force = process.argv.includes('--force');
+const result = await scanAll(force);
 console.log(
   `\nRezultat: ${result.indexed} indexate, ${result.skipped} neschimbate, ${result.failed} eșuate, ${result.deleted} șterse.`
 );

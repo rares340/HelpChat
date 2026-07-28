@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildContextBlock, extractCitedLabels, toCitations } from './chat.js';
+import {
+  buildContextBlock,
+  buildSearchQuery,
+  effectiveCitedLabels,
+  extractCitedLabels,
+  formatSourceRef,
+  toCitations,
+} from './chat.js';
 import type { RetrievedChunk } from './retrieval.js';
 
 const chunk = (over: Partial<RetrievedChunk> = {}): RetrievedChunk => ({
@@ -12,15 +19,37 @@ const chunk = (over: Partial<RetrievedChunk> = {}): RetrievedChunk => ({
   text: 'Valoarea totală este de 4.2 milioane lei.',
   source: 'text',
   score: 0.5,
+  mediaIds: [],
   ...over,
 });
 
 describe('buildContextBlock', () => {
-  it('etichetează fragmentele cu [S1], [S2] și include fișierul și pagina', () => {
-    const block = buildContextBlock([chunk(), chunk({ chunkId: 11, relPath: 'pv.pdf', pageStart: 1, pageEnd: 2 })]);
-    expect(block).toContain('[S1] (deviz.pdf, pag. 3)');
-    expect(block).toContain('[S2] (pv.pdf, pag. 1–2)');
+  it('etichetează fragmentele cu [S1], [S2] și include documentul și pagina', () => {
+    const block = buildContextBlock([chunk(), chunk({ chunkId: 11, title: 'pv', pageStart: 1, pageEnd: 2 })]);
+    expect(block).toContain('[S1] (document: "deviz" · pag. 3)');
+    expect(block).toContain('[S2] (document: "pv" · pag. 1–2)');
     expect(block).toContain('Valoarea totală');
+  });
+
+  it('include folderul sursă (modulul) pentru fișierele din subfoldere', () => {
+    const block = buildContextBlock([
+      chunk({ relPath: 'SIGMA/INVESTITII/Manual_Adaugare.docx', title: 'Manual_Adaugare' }),
+    ]);
+    expect(block).toContain('folder: SIGMA/INVESTITII');
+    expect(block).not.toContain('pag.');
+  });
+});
+
+describe('formatSourceRef', () => {
+  it('PDF-urile includ pagina, .docx doar fișierul', () => {
+    expect(formatSourceRef('deviz.pdf', 3, 3)).toBe('deviz.pdf, pag. 3');
+    expect(formatSourceRef('deviz.pdf', 3, 5)).toBe('deviz.pdf, pag. 3–5');
+    expect(formatSourceRef('BUGET/Manual_Buget.docx', 1, 1)).toBe('BUGET/Manual_Buget.docx');
+  });
+
+  it('video: "pagina" e secunda din înregistrare, afișată ca minut', () => {
+    expect(formatSourceRef('media/demo.mp4', 155, 155)).toBe('media/demo.mp4, min. 2:35');
+    expect(formatSourceRef('media/demo.mp4', 0, 83)).toBe('media/demo.mp4, min. 0:00–1:23');
   });
 });
 
@@ -36,6 +65,48 @@ describe('extractCitedLabels', () => {
 
   it('acceptă și parantezele Unicode 【S1】 folosite uneori de modele', () => {
     expect([...extractCitedLabels('Totalul este 4.750.000 lei【S1】 și C+M 3.100.000 lei【S2】.')].sort()).toEqual([1, 2]);
+  });
+});
+
+describe('buildSearchQuery', () => {
+  it('fără istoric, întrebarea rămâne neschimbată', () => {
+    expect(buildSearchQuery([], 'Cum adaug un produs?')).toBe('Cum adaug un produs?');
+  });
+
+  it('întrebările de continuare primesc contextul ultimelor întrebări', () => {
+    const history = [
+      { role: 'user' as const, content: 'Cum creez un referat de necesitate in Achizitii?' },
+      { role: 'assistant' as const, content: 'Pașii sunt...' },
+    ];
+    const q = buildSearchQuery(history, 'poti sa-mi dai captura de ecran?');
+    expect(q).toContain('referat de necesitate');
+    expect(q).toContain('captura de ecran');
+  });
+
+  it('folosește cel mult ultimele două întrebări ale utilizatorului', () => {
+    const history = ['prima', 'a doua', 'a treia'].map((content) => ({ role: 'user' as const, content }));
+    const q = buildSearchQuery(history, 'acum');
+    expect(q).not.toContain('prima');
+    expect(q).toContain('a doua');
+    expect(q).toContain('a treia');
+  });
+});
+
+describe('effectiveCitedLabels', () => {
+  it('etichetele explicite au prioritate', () => {
+    expect([...effectiveCitedLabels('Răspuns [S2].', 5)]).toEqual([2]);
+  });
+
+  it('răspuns fără etichete → fallback pe primele surse', () => {
+    expect([...effectiveCitedLabels('Iată captura cerută.', 5)].sort()).toEqual([1, 2, 3]);
+  });
+
+  it('refuzul nu primește citări fallback', () => {
+    expect(effectiveCitedLabels('Informația nu se regăsește în documentele indexate.', 5).size).toBe(0);
+  });
+
+  it('fără fragmente recuperate nu există fallback', () => {
+    expect(effectiveCitedLabels('Orice răspuns.', 0).size).toBe(0);
   });
 });
 
@@ -55,5 +126,18 @@ describe('toCitations', () => {
     const [citation] = toCitations([chunk({ text: 'x'.repeat(1000) })]);
     expect(citation.snippet.length).toBeLessThanOrEqual(401);
     expect(citation.snippet.endsWith('…')).toBe(true);
+  });
+
+  it('capturile atașate devin URL-uri servite de backend', () => {
+    const [citation] = toCitations([chunk({ mediaIds: [7, 12] })]);
+    expect(citation.media).toEqual([
+      { id: 7, url: '/api/media/7' },
+      { id: 12, url: '/api/media/12' },
+    ]);
+  });
+
+  it('antetul contextului anunță numărul de capturi', () => {
+    const block = buildContextBlock([chunk({ mediaIds: [7] })]);
+    expect(block).toContain('capturi: 1');
   });
 });

@@ -13,6 +13,7 @@ export interface RetrievedChunk {
   text: string;
   source: ChunkSource;
   score: number;
+  mediaIds: number[];
 }
 
 interface ChunkRow {
@@ -24,6 +25,7 @@ interface ChunkRow {
   page_end: number;
   text: string;
   source: ChunkSource;
+  media_ids: number[];
 }
 
 const ACTIVE_JOIN = `
@@ -34,7 +36,7 @@ const ACTIVE_JOIN = `
 
 const SELECT_FIELDS = `
   c.id AS chunk_id, d.id AS document_id, d.rel_path, d.title,
-  c.page_start, c.page_end, c.text, c.source
+  c.page_start, c.page_end, c.text, c.source, c.media_ids
 `;
 
 /**
@@ -87,5 +89,6 @@ export async function hybridSearch(query: string): Promise<RetrievedChunk[]> {
     text: item.text,
     source: item.source,
     score,
+    mediaIds: item.media_ids ?? [],
   }));
 }

@@ -17,7 +17,7 @@ Aplicație web care răspunde la întrebări în limbaj natural **exclusiv pe ba
                           └──────────────────────────┘
 ```
 
-- **Ingestie**: folderul `PDF_DIR` e scanat la pornire și monitorizat continuu (chokidar). Fiecare PDF: extragere text per pagină (`pdfjs-dist`) → paginile fără strat de text trec prin **OCR** (`glm-ocr`) → fragmentare (~1000 caractere, suprapunere 150) → **embeddings** (`bge-m3`, 1024 dim, batch) → PostgreSQL.
+- **Ingestie**: folderul `PDF_DIR` e scanat la pornire și monitorizat continuu (chokidar). Formate suportate: **PDF** (extragere text per pagină cu `pdfjs-dist`; paginile fără strat de text trec prin **OCR** cu `glm-ocr`), **DOCX** (extragere text cu `mammoth`; fără paginare — citările indică fișierul) și **MP4** (înregistrări de ecran: cadrele-cheie sunt extrase cu `ffmpeg` la schimbări de scenă și descrise de modelul vision `qwen3-vl:32b` de pe `.55` — descrierea + textul de pe ecran intră în index, cu citări pe fișier + minutul din video). Textul e fragmentat (~1000 caractere, suprapunere 150) → **embeddings** (`bge-m3`, 1024 dim, batch) → PostgreSQL. Alte tipuri de fișiere sunt ignorate.
 - **Idempotență**: identitatea documentului e calea relativă, versiunea e SHA-256 al conținutului. Rescanarea nu dublează nimic; un fișier modificat primește o versiune nouă care devine activă **atomic** (cea veche rămâne interogabilă până la finalizare).
 - **Căutare hibridă**: pgvector (cosine, HNSW) + full-text PostgreSQL (`romanian` + unaccent, GIN), fuzionate cu Reciprocal Rank Fusion.
 - **Chat**: modelul primește doar întrebarea, istoricul recent și fragmentele recuperate, cu instrucțiuni stricte de grounding; răspunsul curge prin SSE și include citări `[S1]`… mapate pe fișier/pagină/fragment. Dacă informația lipsește, răspunde explicit că nu se regăsește în documente.
@@ -26,6 +26,7 @@ Aplicație web care răspunde la întrebări în limbaj natural **exclusiv pe ba
 ## Cerințe
 
 - Node.js ≥ 20 (fără Docker) sau Docker + Docker Compose
+- `ffmpeg` pentru indexarea video-urilor (`brew install ffmpeg`; imaginea Docker îl include)
 - PostgreSQL 16+ cu extensia **pgvector** (`vector`), plus `pg_trgm` și `unaccent`
 - Acces la serverele Ollama din rețea (`192.168.100.54` pentru chat/embeddings/OCR)
 

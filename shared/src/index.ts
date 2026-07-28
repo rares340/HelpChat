@@ -1,5 +1,5 @@
 export type DocumentStatus = 'active' | 'indexing' | 'failed' | 'deleted';
-export type ChunkSource = 'text' | 'ocr';
+export type ChunkSource = 'text' | 'ocr' | 'video';
 export type MessageRole = 'user' | 'assistant';
 
 export interface DocumentSummary {
@@ -27,6 +27,8 @@ export interface Citation {
   /** Fragmentul de text care susține răspunsul */
   snippet: string;
   source: ChunkSource;
+  /** Capturi de ecran atașate fragmentului (URL-uri servite de backend) */
+  media: Array<{ id: number; url: string }>;
 }
 
 export interface ChatMessage {
