@@ -1,23 +1,27 @@
 import { config } from '../config.js';
+import { withRetry } from './retry.js';
 
 export interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
+/** POST cu retry pe erori tranzitorii de rețea (rețeaua internă mai cade). */
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(config.OLLAMA_TIMEOUT_MS),
+  return withRetry(async () => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(config.OLLAMA_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`Ollama ${url} → HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
+    }
+    const data = (await res.json()) as T & { error?: string };
+    if (data.error) throw new Error(`Ollama ${url} → ${data.error}`);
+    return data;
   });
-  if (!res.ok) {
-    throw new Error(`Ollama ${url} → HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
-  }
-  const data = (await res.json()) as T & { error?: string };
-  if (data.error) throw new Error(`Ollama ${url} → ${data.error}`);
-  return data;
 }
 
 /** Generează embeddings pentru unul sau mai multe texte (batch). */

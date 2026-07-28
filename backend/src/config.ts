@@ -28,6 +28,7 @@ const schema = z.object({
   TOP_K_LEXICAL: z.coerce.number().int().min(1).default(20),
   TOP_N_CONTEXT: z.coerce.number().int().min(1).default(8),
   PORT: z.coerce.number().int().default(3001),
+  RESCAN_INTERVAL_MIN: z.coerce.number().int().min(1).default(30),
   OLLAMA_TIMEOUT_MS: z.coerce.number().int().default(300_000),
   OLLAMA_KEEP_ALIVE: z.string().default('30m'),
 });
