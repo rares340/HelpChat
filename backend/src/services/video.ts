@@ -3,6 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import ffmpegStatic from 'ffmpeg-static';
 import { config } from '../config.js';
 import { describeFrame } from './ollama.js';
 import { logEvent } from './events.js';
@@ -10,6 +11,8 @@ import type { PageText } from './chunker.js';
 import type { ExtractedImage } from './docx.js';
 
 const run = promisify(execFile);
+const bundledFfmpegPath = ffmpegStatic ?? 'ffmpeg';
+const ffmpegExecutable = config.FFMPEG_PATH === 'ffmpeg' ? bundledFfmpegPath : config.FFMPEG_PATH;
 
 /** Formatează secunde ca m:ss (ex. 155 → "2:35"). */
 export function formatTimestamp(seconds: number): string {
@@ -33,7 +36,8 @@ export function pickEvenly<T>(items: T[], max: number): T[] {
  * le descrie cu modelul vision și le întoarce ca "pagini" în care numărul
  * paginii este secunda din video — citările devin fișier + minutul sursă.
  *
- * Necesită `ffmpeg` în PATH.
+ * Necesită `ffmpeg`; folosim mai întâi binarul inclus prin `ffmpeg-static`,
+ * iar `FFMPEG_PATH` poate suprascrie executabilul folosit.
  */
 export async function extractVideoPages(
   absPath: string,
@@ -43,13 +47,24 @@ export async function extractVideoPages(
   try {
     // Un singur pas: selectează cadrele, scalează la 1280px, scrie JPEG-uri;
     // timestamp-urile ies din filtrul showinfo (pe stderr).
-    const { stderr } = await run('ffmpeg', [
-      '-i', absPath,
-      '-vf', `select='eq(n,0)+gt(scene,${config.VIDEO_SCENE_THRESHOLD})',showinfo,scale=1280:-2`,
-      '-fps_mode', 'vfr',
-      '-q:v', '3',
-      join(workDir, 'f_%04d.jpg'),
-    ], { maxBuffer: 64 * 1024 * 1024 });
+    let stderr: string;
+    try {
+      ({ stderr } = await run(ffmpegExecutable, [
+        '-i', absPath,
+        '-vf', `select='eq(n,0)+gt(scene,${config.VIDEO_SCENE_THRESHOLD})',showinfo,scale=1280:-2`,
+        '-fps_mode', 'vfr',
+        '-q:v', '3',
+        join(workDir, 'f_%04d.jpg'),
+      ], { maxBuffer: 64 * 1024 * 1024 }));
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.includes('ENOENT')) {
+        throw new Error(
+          `Nu găsesc executabilul ffmpeg (${ffmpegExecutable}). Setează FFMPEG_PATH în .env cu path-ul complet sau verifică instalarea ffmpeg-static.`
+        );
+      }
+      throw err;
+    }
 
     const timestamps = [...stderr.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Number(m[1]));
     const files = (await readdir(workDir)).filter((f) => f.endsWith('.jpg')).sort();

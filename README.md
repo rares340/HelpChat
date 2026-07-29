@@ -26,7 +26,7 @@ Aplicație web care răspunde la întrebări în limbaj natural **exclusiv pe ba
 ## Cerințe
 
 - Node.js ≥ 20 (fără Docker) sau Docker + Docker Compose
-- `ffmpeg` pentru indexarea video-urilor (`brew install ffmpeg`; imaginea Docker îl include)
+- `ffmpeg` pentru indexarea video-urilor. Aplicația folosește implicit un binar inclus prin `ffmpeg-static`; dacă vrei un executabil anume, poți seta `FFMPEG_PATH` în `.env` cu path-ul complet către el.
 - PostgreSQL 16+ cu extensia **pgvector** (`vector`), plus `pg_trgm` și `unaccent`
 - Acces la serverele Ollama din rețea (`192.168.100.54` pentru chat/embeddings/OCR)
 

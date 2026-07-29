@@ -18,6 +18,7 @@ const schema = z.object({
   OCR_MODEL: z.string().min(1),
   OLLAMA_URL_VISION: z.string().url().default('http://192.168.100.55:11434'),
   VISION_MODEL: z.string().min(1).default('qwen3-vl:32b'),
+  FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
   VIDEO_MAX_FRAMES: z.coerce.number().int().min(1).default(12),
   VIDEO_SCENE_THRESHOLD: z.coerce.number().min(0.01).max(1).default(0.08),
   PDF_DIR: z.string().min(1),
