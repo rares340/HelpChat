@@ -48,8 +48,8 @@ export async function embed(input: string[]): Promise<number[][]> {
 
 /**
  * Chat cu streaming pe API-ul nativ Ollama. Emite doar deltele din
- * `message.content` — câmpul `reasoning`/`thinking` al modelelor thinking
- * este ignorat intenționat (vezi MODELE-LOCALE-INDECO.md §5).
+ * `message.content`. `think: false` oprește modul de raționament intern
+ * al modelelor Qwen3 (altfel consumă token-uri + latență fără să le vedem).
  */
 export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator<string> {
   const res = await fetch(`${config.OLLAMA_URL_CHAT}/api/chat`, {
@@ -59,6 +59,7 @@ export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator
       model: config.CHAT_MODEL,
       messages,
       stream: true,
+      think: false,
       keep_alive: config.OLLAMA_KEEP_ALIVE,
       options: { temperature: config.CHAT_TEMPERATURE },
     }),
@@ -94,13 +95,14 @@ export async function chat(messages: OllamaChatMessage[]): Promise<string> {
     model: config.CHAT_MODEL,
     messages,
     stream: false,
+    think: false,
     keep_alive: config.OLLAMA_KEEP_ALIVE,
     options: { temperature: config.CHAT_TEMPERATURE },
   });
   return data.message.content;
 }
 
-/** OCR: extrage textul dintr-o imagine PNG (base64) cu modelul dedicat. */
+/** OCR: extrage textul dintr-o imagine PNG (base64) cu modelul vision. */
 export async function ocrImage(imageBase64: string): Promise<string> {
   const data = await postJson<{ response: string }>(`${config.OLLAMA_URL_OCR}/api/generate`, {
     model: config.OCR_MODEL,
@@ -108,25 +110,6 @@ export async function ocrImage(imageBase64: string): Promise<string> {
     images: [imageBase64],
     stream: false,
     keep_alive: config.OLLAMA_KEEP_ALIVE,
-  });
-  return data.response;
-}
-
-/** Descrie un cadru dintr-o înregistrare de ecran cu modelul vision (pe .55). */
-export async function describeFrame(imageBase64: string): Promise<string> {
-  const data = await postJson<{ response: string }>(`${config.OLLAMA_URL_VISION}/api/generate`, {
-    model: config.VISION_MODEL,
-    prompt:
-      'Aceasta este o captură dintr-o înregistrare de ecran a unei aplicații software. ' +
-      'Descrie concis, în română: 1) ce ecran/modul este afișat; 2) ce acțiune pare să se execute; ' +
-      '3) transcrie textul important vizibil (titluri, câmpuri, butoane, mesaje, valori). ' +
-      'Maxim 150 de cuvinte. Fii precis, nu inventa.',
-    images: [imageBase64],
-    stream: false,
-    keep_alive: config.OLLAMA_KEEP_ALIVE,
-    // Fără num_predict: qwen3-vl e model thinking — un plafon mic e consumat
-    // integral de raționamentul intern și răspunsul iese gol (done_reason: length).
-    options: { temperature: 0.1 },
   });
   return data.response;
 }

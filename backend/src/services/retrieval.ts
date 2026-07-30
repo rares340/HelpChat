@@ -3,6 +3,15 @@ import { config } from '../config.js';
 import { pool, toVectorLiteral } from '../db/pool.js';
 import { embed } from './ollama.js';
 
+export function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 export interface RetrievedChunk {
   chunkId: number;
   documentId: number;
@@ -58,6 +67,7 @@ export function rrfFuse<T>(lists: T[][], key: (item: T) => number | string, k = 
 
 /** Căutare hibridă: semantic (pgvector, cosine) + lexical (tsvector) + RRF. */
 export async function hybridSearch(query: string): Promise<RetrievedChunk[]> {
+  const normalizedQuery = normalizeSearchText(query);
   const [queryVector] = await embed([query]);
 
   const semantic = pool.query<ChunkRow>(
@@ -67,12 +77,13 @@ export async function hybridSearch(query: string): Promise<RetrievedChunk[]> {
     [toVectorLiteral(queryVector), config.TOP_K_SEMANTIC]
   );
 
+  const lexicalQuery = normalizedQuery || normalizeSearchText(query.split(/\s+/).filter(Boolean).join(' '));
   const lexical = pool.query<ChunkRow>(
     `SELECT ${SELECT_FIELDS} ${ACTIVE_JOIN}
      WHERE c.tsv @@ websearch_to_tsquery('romanian', immutable_unaccent($1))
      ORDER BY ts_rank(c.tsv, websearch_to_tsquery('romanian', immutable_unaccent($1))) DESC
      LIMIT $2`,
-    [query, config.TOP_K_LEXICAL]
+    [lexicalQuery || query, config.TOP_K_LEXICAL]
   );
 
   const [semanticRows, lexicalRows] = await Promise.all([semantic, lexical]);

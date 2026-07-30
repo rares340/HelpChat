@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { rrfFuse } from './retrieval.js';
+import { normalizeSearchText, rrfFuse } from './retrieval.js';
 
 interface Item {
   id: number;
 }
 const items = (...ids: number[]): Item[] => ids.map((id) => ({ id }));
+
+describe('normalizeSearchText', () => {
+  it('elimină diacriticele, semnele de punctuație și normalizează spațiile', () => {
+    expect(normalizeSearchText('  Cum se face “instalarea” în România?  ')).toBe('cum se face instalarea in romania');
+  });
+
+  it('returnează șir gol pentru textul vid sau doar semne de punctuație', () => {
+    expect(normalizeSearchText('   ???  ')).toBe('');
+  });
+});
 
 describe('rrfFuse', () => {
   it('un element prezent în ambele liste primește scor din ambele', () => {

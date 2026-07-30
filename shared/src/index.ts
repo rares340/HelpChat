@@ -1,5 +1,5 @@
 export type DocumentStatus = 'active' | 'indexing' | 'failed' | 'deleted';
-export type ChunkSource = 'text' | 'ocr' | 'video';
+export type ChunkSource = 'text' | 'ocr';
 export type MessageRole = 'user' | 'assistant';
 
 export interface DocumentSummary {

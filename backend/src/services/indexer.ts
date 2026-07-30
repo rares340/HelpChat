@@ -8,13 +8,12 @@ import { embed } from './ollama.js';
 import { ocrImage } from './ollama.js';
 import { openPdf, MIN_TEXT_CHARS_PER_PAGE } from './pdf.js';
 import { extractDocxContent, type ExtractedImage } from './docx.js';
-import { extractVideoPages } from './video.js';
 import { chunkPages, type PageText } from './chunker.js';
 
 const EMBED_BATCH_SIZE = 32;
 
 /** Extensiile indexabile; orice alt fișier din folder este ignorat tăcut. */
-export const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.mp4'];
+export const SUPPORTED_EXTENSIONS = ['.pdf', '.docx'];
 
 export function isSupportedFile(name: string): boolean {
   const lower = name.toLowerCase();
@@ -167,10 +166,6 @@ export function parseMediaMarkers(text: string): { cleanText: string; seqs: numb
 
 /** Extrage conținutul în funcție de tipul fișierului. */
 async function extractContent(relPath: string, buffer: Buffer): Promise<ExtractedContent> {
-  if (relPath.toLowerCase().endsWith('.mp4')) {
-    const { pages, images } = await extractVideoPages(join(config.pdfDir, relPath), relPath);
-    return { pages, pageCount: null, ocrPages: 0, images };
-  }
   if (relPath.toLowerCase().endsWith('.docx')) {
     const { text, images } = await extractDocxContent(buffer);
     return {

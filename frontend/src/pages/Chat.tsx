@@ -3,18 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import type { ChatMessage, Citation, Conversation } from '@practica/shared';
 import { api, streamChat } from '../api/client';
 
-function mmss(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
-}
-
-/** .docx nu are paginare fixă — afișăm doar fișierul; la video afișăm minutul. */
+/** .docx nu are paginare fixă — afișăm doar fișierul. */
 function formatRef(c: Citation): string {
-  const lower = c.relPath.toLowerCase();
-  if (lower.endsWith('.docx')) return c.relPath;
-  if (lower.endsWith('.mp4')) {
-    const range = c.pageStart === c.pageEnd ? `min. ${mmss(c.pageStart)}` : `min. ${mmss(c.pageStart)}–${mmss(c.pageEnd)}`;
-    return `${c.relPath} · ${range}`;
-  }
+  if (c.relPath.toLowerCase().endsWith('.docx')) return c.relPath;
   const pages = c.pageStart === c.pageEnd ? `pag. ${c.pageStart}` : `pag. ${c.pageStart}–${c.pageEnd}`;
   return `${c.relPath} · ${pages}`;
 }
@@ -153,7 +144,6 @@ export function ChatPage() {
                           >
                             [{c.label}] {formatRef(c)}
                             {c.source === 'ocr' && <span className="ocr-badge">OCR</span>}
-                            {c.source === 'video' && <span className="ocr-badge">VIDEO</span>}
                             {c.media.length > 0 && <span className="ocr-badge media-badge">📷 {c.media.length}</span>}
                           </button>
                         ))}

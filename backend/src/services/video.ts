@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -112,3 +113,8 @@ export async function extractVideoPages(
     await rm(workDir, { recursive: true, force: true });
   }
 }
+=======
+// Modulul de indexare video a fost eliminat din aplicație.
+// Acest fișier este păstrat doar ca punct istoric; nu mai este importat de nimeni.
+export {};
+>>>>>>> Stashed changes

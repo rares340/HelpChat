@@ -46,11 +46,6 @@ describe('formatSourceRef', () => {
     expect(formatSourceRef('deviz.pdf', 3, 5)).toBe('deviz.pdf, pag. 3–5');
     expect(formatSourceRef('BUGET/Manual_Buget.docx', 1, 1)).toBe('BUGET/Manual_Buget.docx');
   });
-
-  it('video: "pagina" e secunda din înregistrare, afișată ca minut', () => {
-    expect(formatSourceRef('media/demo.mp4', 155, 155)).toBe('media/demo.mp4, min. 2:35');
-    expect(formatSourceRef('media/demo.mp4', 0, 83)).toBe('media/demo.mp4, min. 0:00–1:23');
-  });
 });
 
 describe('extractCitedLabels', () => {
