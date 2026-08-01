@@ -1,16 +1,18 @@
 import type { ChatStreamEvent, Citation } from '@practica/shared';
+import { config } from '../config.js';
 import { pool } from '../db/pool.js';
-import { chatStream, type OllamaChatMessage } from './ollama.js';
+import { chatStream, chatWithTools, type OllamaChatMessage } from './ollama.js';
 import { hybridSearch, type RetrievedChunk } from './retrieval.js';
+import { callMcpTool, getOllamaTools, isMcpReady } from './mcpClient.js';
 
 const HISTORY_MESSAGES = 6;
 const SNIPPET_MAX_CHARS = 400;
 
-/** Unele modele (chiar și cu `think: false`) emit totuși un bloc `<think>…</think>`
+/** Unele modele (chiar și cu `think: false`) emit totuși un bloc `think…/think`
  *  în `content` înainte de răspunsul propriu-zis. Îl tăiem înainte de streaming
  *  ca utilizatorul să nu vadă raționamentul intern. */
 function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trimStart();
+  return text.replace(/think[\s\S]*?\/think/gi, '').trimStart();
 }
 
 const SYSTEM_PROMPT = `Ești un asistent care răspunde STRICT pe baza fragmentelor din documentele furnizate în mesajul utilizatorului.
@@ -113,9 +115,32 @@ async function getHistory(conversationId: number): Promise<OllamaChatMessage[]> 
   return rows.reverse().map((r) => ({ role: r.role, content: r.content }));
 }
 
+/** Streaming helper: elimină blocurile think înainte de a emite tokenii. */
+async function* streamWithThinkStrip(messages: OllamaChatMessage[]): AsyncGenerator<string> {
+  let thinkOpen = false;
+  let buffer = '';
+  for await (const token of chatStream(messages)) {
+    buffer += token;
+    if (thinkOpen && buffer.includes('/think')) {
+      const idx = buffer.indexOf('/think') + '/think'.length;
+      buffer = buffer.slice(idx);
+      thinkOpen = false;
+    }
+    if (!thinkOpen && buffer.includes('think') && !buffer.includes('/think')) {
+      thinkOpen = true;
+      const idx = buffer.indexOf('think');
+      buffer = buffer.slice(0, idx);
+    }
+    if (!thinkOpen && buffer) {
+      yield buffer;
+      buffer = '';
+    }
+  }
+}
+
 /**
  * Fluxul complet al unei întrebări: persistă întrebarea, recuperează fragmente,
- * generează răspunsul în streaming și persistă mesajul asistentului cu citări.
+ * generează răspunsul (cu sau fără tool-use) și persistă mesajul asistentului cu citări.
  */
 export async function* answerQuestion(conversationId: number, question: string): AsyncGenerator<ChatStreamEvent> {
   // Istoricul se citește ÎNAINTE de a persista întrebarea curentă.
@@ -141,31 +166,46 @@ export async function* answerQuestion(conversationId: number, question: string):
   ];
 
   let answer = '';
-  let thinkOpen = false;
-  let buffer = '';
-  for await (const token of chatStream(messages)) {
-    buffer += token;
-    // Dacă tocmai s-a închis un bloc <think>, îl eliminăm înainte de a afișa.
-    if (thinkOpen && buffer.includes('</think>')) {
-      const idx = buffer.indexOf('</think>') + '</think>'.length;
-      buffer = buffer.slice(idx);
-      thinkOpen = false;
+
+  if (isMcpReady()) {
+    // === Ramura cu tool-use (non-streaming, max MCP_MAX_ITERATIONS) ===
+    const tools = getOllamaTools();
+    for (let i = 0; i < config.MCP_MAX_ITERATIONS; i++) {
+      const result = await chatWithTools(messages, tools);
+      if (!result.tool_calls || result.tool_calls.length === 0) {
+        if (result.content) {
+          answer = result.content;
+          yield { type: 'token', content: result.content };
+        }
+        break;
+      }
+      messages.push({ role: 'assistant', content: result.content });
+      for (const tc of result.tool_calls) {
+        yield { type: 'tool_call', name: tc.function.name, args: tc.function.arguments };
+        let output: unknown;
+        try {
+          output = await callMcpTool(tc.function.name, tc.function.arguments);
+        } catch (err) {
+          output = { error: (err as Error).message };
+        }
+        yield { type: 'tool_result', name: tc.function.name, output };
+        messages.push({
+          role: 'tool',
+          content: JSON.stringify(output),
+          tool_call_id: tc.id,
+          name: tc.function.name,
+        });
+      }
     }
-    // Dacă apare <think> fără închidere încă, nu afișăm nimic până se termină.
-    if (!thinkOpen && buffer.includes('<think>') && !buffer.includes('</think>')) {
-      thinkOpen = true;
-      const idx = buffer.indexOf('<think>');
-      // Afișăm doar textul de dinainte de <think>, în caz că există.
-      buffer = buffer.slice(0, idx);
+    answer = stripThinking(answer);
+  } else {
+    // === Ramura clasică (streaming) ===
+    for await (const token of streamWithThinkStrip(messages)) {
+      answer += token;
+      yield { type: 'token', content: token };
     }
-    if (!thinkOpen && buffer) {
-      answer += buffer;
-      yield { type: 'token', content: buffer };
-      buffer = '';
-    }
+    answer = stripThinking(answer);
   }
-  // Dacă modelul a uitat să închidă </think>, ignorăm orice a rămas în buffer.
-  answer = stripThinking(answer);
 
   const citations = toCitations(chunks, effectiveCitedLabels(answer, chunks.length));
   const { rows } = await pool.query<{ id: number }>(

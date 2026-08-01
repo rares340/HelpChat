@@ -2,8 +2,11 @@ import { config } from '../config.js';
 import { withRetry } from './retry.js';
 
 export interface OllamaChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /** Necesare de unele modele pentru a asocia mesajul tool cu apelul care l-a produs. */
+  tool_call_id?: string;
+  name?: string;
 }
 
 /** POST cu retry pe erori tranzitorii de rețea (rețeaua internă mai cade). */
@@ -100,6 +103,44 @@ export async function chat(messages: OllamaChatMessage[]): Promise<string> {
     options: { temperature: config.CHAT_TEMPERATURE },
   });
   return data.message.content;
+}
+
+export interface OllamaToolCall {
+  /** ID unic al apelului (pentru a lega răspunsul tool-ului). */
+  id: string;
+  /** Numele funcției, ex. "ping". */
+  function: { name: string; arguments: Record<string, unknown> };
+}
+
+export interface ChatWithToolsResult {
+  content: string;
+  tool_calls?: OllamaToolCall[];
+}
+
+/**
+ * Apel non-streaming la Ollama cu suport pt. tool calling.
+ * Returnează content-ul textual + (opțional) tool_calls de executat.
+ * Folosit de bucla tool-use din chat.ts.
+ */
+export async function chatWithTools(
+  messages: OllamaChatMessage[],
+  tools: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>
+): Promise<ChatWithToolsResult> {
+  const data = await postJson<{
+    message: { content: string; tool_calls?: OllamaToolCall[] };
+  }>(`${config.OLLAMA_URL_CHAT}/api/chat`, {
+    model: config.CHAT_MODEL,
+    messages,
+    tools,
+    stream: false,
+    think: false,
+    keep_alive: config.OLLAMA_KEEP_ALIVE,
+    options: { temperature: config.CHAT_TEMPERATURE },
+  });
+  return {
+    content: data.message.content ?? '',
+    tool_calls: data.message.tool_calls,
+  };
 }
 
 /** OCR: extrage textul dintr-o imagine PNG (base64) cu modelul vision. */

@@ -16,14 +16,9 @@ const schema = z.object({
   EMBED_MODEL: z.string().min(1),
   EMBED_DIM: z.coerce.number().int().positive(),
   OCR_MODEL: z.string().min(1),
-<<<<<<< Updated upstream
-  OLLAMA_URL_VISION: z.string().url().default('http://192.168.100.55:11434'),
-  VISION_MODEL: z.string().min(1).default('qwen3-vl:32b'),
-  FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
-=======
   OLLAMA_URL_VISION: z.string().url().default('http://localhost:11434'),
-  VISION_MODEL: z.string().min(1).default('llama3.2'),
->>>>>>> Stashed changes
+  VISION_MODEL: z.string().min(1).default('qwen2.5vl:3b'),
+  FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
   VIDEO_MAX_FRAMES: z.coerce.number().int().min(1).default(12),
   VIDEO_SCENE_THRESHOLD: z.coerce.number().min(0.01).max(1).default(0.08),
   PDF_DIR: z.string().min(1),
@@ -37,6 +32,9 @@ const schema = z.object({
   RESCAN_INTERVAL_MIN: z.coerce.number().int().min(1).default(30),
   OLLAMA_TIMEOUT_MS: z.coerce.number().int().default(300_000),
   OLLAMA_KEEP_ALIVE: z.string().default('30m'),
+  MCP_ENABLED: z.coerce.boolean().default(false),
+  MCP_SERVER_PATH: z.string().default('src/mcp/server.ts'),
+  MCP_MAX_ITERATIONS: z.coerce.number().int().min(1).default(5),
 });
 
 const parsed = schema.safeParse(process.env);

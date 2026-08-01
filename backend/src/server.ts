@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { healthCheck } from './services/health.js';
 import { startWatcher } from './services/watcher.js';
+import { startMcpClient } from './services/mcpClient.js';
 
 const app = await buildServer();
 
@@ -15,6 +16,9 @@ if (!health.ok) {
 } else {
   console.log('✓ DB, Ollama și dimensiunea embeddings verificate.');
 }
+
+// Pornește clientul MCP (dacă e activat) — nu blocăm boot-ul dacă pică.
+await startMcpClient();
 
 if (health.db.ok) {
   // Versiunile rămase în 'indexing' sunt resturi ale unei porniri întrerupte.

@@ -10,11 +10,18 @@ function formatRef(c: Citation): string {
   return `${c.relPath} · ${pages}`;
 }
 
+interface ToolCall {
+  name: string;
+  args: unknown;
+  output?: unknown;
+}
+
 interface DraftMessage {
   role: 'user' | 'assistant';
   content: string;
   citations: Citation[];
   streaming?: boolean;
+  toolCalls?: ToolCall[];
 }
 
 export function ChatPage() {
@@ -74,6 +81,18 @@ export function ChatPage() {
           setActiveId(event.conversationId);
         } else if (event.type === 'token') {
           updateLast((m) => ({ ...m, content: m.content + event.content }));
+        } else if (event.type === 'tool_call') {
+          updateLast((m) => ({
+            ...m,
+            toolCalls: [...(m.toolCalls ?? []), { name: event.name, args: event.args }],
+          }));
+        } else if (event.type === 'tool_result') {
+          updateLast((m) => ({
+            ...m,
+            toolCalls: (m.toolCalls ?? []).map((tc) =>
+              tc.name === event.name && tc.output === undefined ? { ...tc, output: event.output } : tc
+            ),
+          }));
         } else if (event.type === 'done') {
           updateLast((m) => ({ ...m, citations: event.citations, streaming: false }));
         } else if (event.type === 'error') {
@@ -133,6 +152,23 @@ export function ChatPage() {
                   <>
                     <ReactMarkdown>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
                     {m.streaming && <span className="cursor">▍</span>}
+                    {m.toolCalls && m.toolCalls.length > 0 && (
+                      <details className="tool-calls">
+                        <summary>Am consultat: {m.toolCalls.map((tc) => tc.name).join(', ')}</summary>
+                        {m.toolCalls.map((tc, idx) => (
+                          <div key={idx} className="tool-call">
+                            <strong>{tc.name}</strong>
+                            <pre>{JSON.stringify(tc.args, null, 2)}</pre>
+                            {tc.output !== undefined && (
+                              <>
+                                <em>rezultat:</em>
+                                <pre>{JSON.stringify(tc.output, null, 2)}</pre>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </details>
+                    )}
                     {m.citations.length > 0 && (
                       <div className="citations">
                         {m.citations.map((c) => (

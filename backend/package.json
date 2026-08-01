@@ -14,6 +14,7 @@
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@fastify/static": "^10.1.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/canvas": "^0.1.65",
     "@practica/shared": "*",
     "chokidar": "^4.0.0",

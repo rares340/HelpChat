@@ -63,10 +63,19 @@ export interface IndexStatus {
   lastScanAt: string | null;
 }
 
+/** Tool apelat de model în timpul unei întrebări (vizibil în UI ca „Am consultat: …"). */
+export interface ToolInvocation {
+  name: string;
+  args: unknown;
+  output: unknown;
+}
+
 /** Evenimente SSE trimise de /api/chat */
 export type ChatStreamEvent =
   | { type: 'conversation'; conversationId: number }
   | { type: 'sources'; citations: Citation[] }
+  | { type: 'tool_call'; name: string; args: unknown }
+  | { type: 'tool_result'; name: string; output: unknown }
   | { type: 'token'; content: string }
   | { type: 'done'; messageId: number; citations: Citation[] }
   | { type: 'error'; message: string };
