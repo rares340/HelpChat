@@ -21,6 +21,7 @@ interface DraftMessage {
   content: string;
   citations: Citation[];
   streaming?: boolean;
+  /** Tool-uri MCP apelate de model (ex. facturi, statistici). */
   toolCalls?: ToolCall[];
 }
 
@@ -127,7 +128,7 @@ export function ChatPage() {
               <button className="conversation-title" onClick={() => openConversation(c.id)} title={c.title}>
                 {c.title}
               </button>
-              <button className="icon-btn" title="Șterge conversația" onClick={() => removeConversation(c.id)}>
+              <button className="icon-btn" title="Șterge conversația" onClick={() => removeConversation(id)}>
                 ✕
               </button>
             </li>

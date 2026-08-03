@@ -10,8 +10,10 @@
   ],
   "scripts": {
     "dev": "concurrently -k -n backend,frontend -c blue,green \"npm run dev -w backend\" \"wait-on http://localhost:3001/api/health -t 60000 && npm run dev -w frontend\"",
+    "start": "concurrently -n backend,frontend -c blue,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "migrate": "npm run migrate -w backend",
     "index": "npm run index -w backend",
+    "seed:facturi": "npm run seed:facturi -w backend",
     "test": "npm run test -w backend",
     "build": "npm run build -w shared && npm run build -w backend && npm run build -w frontend"
   },

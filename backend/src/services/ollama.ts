@@ -1,12 +1,39 @@
 import { config } from '../config.js';
 import { withRetry } from './retry.js';
 
+export interface OllamaToolCall {
+  /** ID unic al apelului (pentru a lega răspunsul tool-ului). */
+  id: string;
+  /** Numele funcției, ex. "ping". */
+  function: { name: string; arguments: Record<string, unknown> };
+}
+
 export interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   /** Necesare de unele modele pentru a asocia mesajul tool cu apelul care l-a produs. */
   tool_call_id?: string;
   name?: string;
+  /** Pe mesajele assistant: apelurile de tool cerute de model. */
+  tool_calls?: OllamaToolCall[];
+  /** Pe mesajele tool: numele tool-ului al cărui rezultat este content. */
+  tool_name?: string;
+}
+
+/** Definiție de tool în formatul nativ Ollama /api/chat. */
+export interface OllamaToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+/** Delta emisă de chatStream: text de răspuns și/sau apeluri de tool. */
+export interface OllamaChatDelta {
+  content?: string;
+  toolCalls?: OllamaToolCall[];
 }
 
 /** POST cu retry pe erori tranzitorii de rețea (rețeaua internă mai cade). */
@@ -50,11 +77,15 @@ export async function embed(input: string[]): Promise<number[][]> {
 }
 
 /**
- * Chat cu streaming pe API-ul nativ Ollama. Emite doar deltele din
- * `message.content`. `think: false` oprește modul de raționament intern
+ * Chat cu streaming pe API-ul nativ Ollama, opțional cu tool-uri (function
+ * calling). Emite deltele din `message.content` și apelurile de tool din
+ * `message.tool_calls`. `think: false` oprește modul de raționament intern
  * al modelelor Qwen3 (altfel consumă token-uri + latență fără să le vedem).
  */
-export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator<string> {
+export async function* chatStream(
+  messages: OllamaChatMessage[],
+  tools?: OllamaToolDefinition[]
+): AsyncGenerator<OllamaChatDelta> {
   const res = await fetch(`${config.OLLAMA_URL_CHAT}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,6 +96,7 @@ export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator
       think: false,
       keep_alive: config.OLLAMA_KEEP_ALIVE,
       options: { temperature: config.CHAT_TEMPERATURE },
+      ...(tools?.length ? { tools } : {}),
     }),
     signal: AbortSignal.timeout(config.OLLAMA_TIMEOUT_MS),
   });
@@ -82,12 +114,13 @@ export async function* chatStream(messages: OllamaChatMessage[]): AsyncGenerator
       buffer = buffer.slice(nl + 1);
       if (!line) continue;
       const json = JSON.parse(line) as {
-        message?: { content?: string };
+        message?: { content?: string; tool_calls?: OllamaToolCall[] };
         error?: string;
         done?: boolean;
       };
       if (json.error) throw new Error(`Ollama chat → ${json.error}`);
-      if (json.message?.content) yield json.message.content;
+      if (json.message?.tool_calls?.length) yield { toolCalls: json.message.tool_calls };
+      if (json.message?.content) yield { content: json.message.content };
     }
   }
 }
@@ -103,13 +136,6 @@ export async function chat(messages: OllamaChatMessage[]): Promise<string> {
     options: { temperature: config.CHAT_TEMPERATURE },
   });
   return data.message.content;
-}
-
-export interface OllamaToolCall {
-  /** ID unic al apelului (pentru a lega răspunsul tool-ului). */
-  id: string;
-  /** Numele funcției, ex. "ping". */
-  function: { name: string; arguments: Record<string, unknown> };
 }
 
 export interface ChatWithToolsResult {
