@@ -7,6 +7,7 @@ import type {
   IndexStatus,
   IngestionEvent,
   RecentErrors,
+  StarterSuggestions,
   TopCited,
   UsageStats,
 } from '@practica/shared';
@@ -31,6 +32,7 @@ export const api = {
   getStatsUsage: (days = 30) => getJson<UsageStats>(`/api/stats/usage?days=${days}`),
   getStatsErrors: (limit = 20) => getJson<RecentErrors>(`/api/stats/errors?limit=${limit}`),
   getStatsTopCited: (limit = 10) => getJson<TopCited>(`/api/stats/top-cited?limit=${limit}`),
+  getSuggestions: () => getJson<StarterSuggestions>('/api/suggestions'),
 };
 
 /**

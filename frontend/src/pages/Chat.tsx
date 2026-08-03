@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { ChatMessage, Citation, Conversation } from '@practica/shared';
+import type { ChatMessage, Citation, Conversation, StarterSuggestions } from '@practica/shared';
 import { api, streamChat } from '../api/client';
 
 /** .docx nu are paginare fixă — afișăm doar fișierul. */
@@ -20,6 +20,8 @@ interface DraftMessage {
   role: 'user' | 'assistant';
   content: string;
   citations: Citation[];
+  /** Întrebări propuse pentru continuarea discuției. */
+  suggestions: string[];
   streaming?: boolean;
   /** Tool-uri MCP apelate de model (ex. facturi, statistici). */
   toolCalls?: ToolCall[];
@@ -33,6 +35,7 @@ export function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openCitation, setOpenCitation] = useState<Citation | null>(null);
+  const [starters, setStarters] = useState<StarterSuggestions | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const refreshConversations = useCallback(() => {
@@ -40,6 +43,11 @@ export function ChatPage() {
   }, []);
 
   useEffect(refreshConversations, [refreshConversations]);
+
+  // Sugestiile de pornire depind de ce e indexat — se încarcă o dată.
+  useEffect(() => {
+    api.getSuggestions().then(setStarters).catch(() => {});
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -56,21 +64,29 @@ export function ChatPage() {
     api
       .getMessages(id)
       .then((msgs: ChatMessage[]) =>
-        setMessages(msgs.map((m) => ({ role: m.role, content: m.content, citations: m.citations })))
+        setMessages(
+          msgs.map((m) => ({
+            role: m.role,
+            content: m.content,
+            citations: m.citations,
+            suggestions: m.suggestions ?? [],
+          }))
+        )
       )
       .catch(() => setError('Nu am putut încărca conversația.'));
   }, []);
 
-  async function send() {
-    const q = question.trim();
+  /** `preset` vine din chips-urile de sugestii; altfel se trimite textul din compozitor. */
+  async function send(preset?: string) {
+    const q = (preset ?? question).trim();
     if (!q || busy) return;
     setBusy(true);
     setError(null);
     setQuestion('');
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: q, citations: [] },
-      { role: 'assistant', content: '', citations: [], streaming: true },
+      { role: 'user', content: q, citations: [], suggestions: [] },
+      { role: 'assistant', content: '', citations: [], suggestions: [], streaming: true },
     ]);
 
     const updateLast = (fn: (m: DraftMessage) => DraftMessage) =>
@@ -96,6 +112,8 @@ export function ChatPage() {
           }));
         } else if (event.type === 'done') {
           updateLast((m) => ({ ...m, citations: event.citations, streaming: false }));
+        } else if (event.type === 'suggestions') {
+          updateLast((m) => ({ ...m, suggestions: event.items }));
         } else if (event.type === 'error') {
           setError(event.message);
           updateLast((m) => ({ ...m, streaming: false }));
@@ -143,7 +161,23 @@ export function ChatPage() {
               <h2>Întreabă documentele</h2>
               <p>
                 Răspunsurile se bazează exclusiv pe PDF-urile indexate și includ citări cu fișierul și pagina sursă.
+                Poți întreba și despre facturi, plăți sau parteneri.
               </p>
+              {starters && starters.questions.length > 0 && (
+                <div className="starters">
+                  <span className="starters-label">Începe cu:</span>
+                  <div className="suggestions">
+                    {starters.questions.map((q) => (
+                      <button key={q} className="suggestion-chip" onClick={() => send(q)} disabled={busy}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {starters && starters.topics.length > 0 && (
+                <p className="starters-topics">Teme acoperite: {starters.topics.join(' · ')}</p>
+              )}
             </div>
           )}
           {messages.map((m, i) => (
@@ -182,6 +216,16 @@ export function ChatPage() {
                             [{c.label}] {formatRef(c)}
                             {c.source === 'ocr' && <span className="ocr-badge">OCR</span>}
                             {c.media.length > 0 && <span className="ocr-badge media-badge">📷 {c.media.length}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {/* Continuările apar doar sub ultimul răspuns, ca să nu aglomereze firul. */}
+                    {m.suggestions.length > 0 && !m.streaming && i === messages.length - 1 && (
+                      <div className="suggestions follow-ups">
+                        {m.suggestions.map((s) => (
+                          <button key={s} className="suggestion-chip" onClick={() => send(s)} disabled={busy}>
+                            {s}
                           </button>
                         ))}
                       </div>
@@ -243,7 +287,7 @@ export function ChatPage() {
               }
             }}
           />
-          <button className="btn primary" disabled={busy || !question.trim()} onClick={send}>
+          <button className="btn primary" disabled={busy || !question.trim()} onClick={() => send()}>
             {busy ? 'Se generează…' : 'Trimite'}
           </button>
         </div>

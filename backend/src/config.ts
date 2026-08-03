@@ -35,6 +35,12 @@ const schema = z.object({
   MCP_ENABLED: z.coerce.boolean().default(false),
   MCP_SERVER_PATH: z.string().default('src/mcp/server.ts'),
   MCP_MAX_ITERATIONS: z.coerce.number().int().min(1).default(5),
+  // Sugestiile de continuare cer un apel scurt suplimentar la model după
+  // fiecare răspuns; pot fi oprite dacă latența contează mai mult.
+  SUGGESTIONS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 const parsed = schema.safeParse(process.env);
