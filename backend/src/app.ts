@@ -96,6 +96,47 @@ export async function buildServer(): Promise<FastifyInstance> {
     return { started: true, force };
   });
 
+  // === Statistici (citite direct din view-uri, fără LLM) ===
+
+  app.get('/api/stats/documents', async () => {
+    const { rows } = await pool.query(
+      `SELECT active, indexing, failed, deleted, total FROM v_document_stats`
+    );
+    return rows[0];
+  });
+
+  app.get<{ Querystring: { days?: string } }>('/api/stats/usage', async (req) => {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+    const { rows } = await pool.query(
+      `SELECT day, conversations, messages
+         FROM v_usage_daily
+        WHERE day >= (current_date - $1::int)
+        ORDER BY day ASC`,
+      [days]
+    );
+    return { days, daily: rows };
+  });
+
+  app.get<{ Querystring: { limit?: string } }>('/api/stats/errors', async (req) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
+    const { rows } = await pool.query(
+      `SELECT id, level, stage, rel_path, message, created_at
+         FROM v_recent_errors LIMIT $1::int`,
+      [limit]
+    );
+    return { count: rows.length, errors: rows };
+  });
+
+  app.get<{ Querystring: { limit?: string } }>('/api/stats/top-cited', async (req) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
+    const { rows } = await pool.query(
+      `SELECT document_id, rel_path, title, citation_count
+         FROM v_top_cited_documents LIMIT $1::int`,
+      [limit]
+    );
+    return { count: rows.length, documents: rows };
+  });
+
   // Servește imaginile extrase din documente (capturi de ecran, cadre video).
   app.get<{ Params: { id: string } }>('/api/media/:id', async (req, reply) => {
     const id = Number(req.params.id);

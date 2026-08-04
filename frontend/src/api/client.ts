@@ -2,9 +2,13 @@ import type {
   ChatMessage,
   ChatStreamEvent,
   Conversation,
+  DocumentStats,
   DocumentSummary,
   IndexStatus,
   IngestionEvent,
+  RecentErrors,
+  TopCited,
+  UsageStats,
 } from '@practica/shared';
 
 async function getJson<T>(url: string): Promise<T> {
@@ -22,6 +26,11 @@ export const api = {
   getEvents: (limit = 100) => getJson<IngestionEvent[]>(`/api/admin/events?limit=${limit}`),
   reindex: () => fetch('/api/admin/reindex', { method: 'POST' }),
   health: () => getJson<{ ok: boolean }>('/api/health'),
+  // Statistici (consumate de Admin)
+  getStatsDocuments: () => getJson<DocumentStats>('/api/stats/documents'),
+  getStatsUsage: (days = 30) => getJson<UsageStats>(`/api/stats/usage?days=${days}`),
+  getStatsErrors: (limit = 20) => getJson<RecentErrors>(`/api/stats/errors?limit=${limit}`),
+  getStatsTopCited: (limit = 10) => getJson<TopCited>(`/api/stats/top-cited?limit=${limit}`),
 };
 
 /**

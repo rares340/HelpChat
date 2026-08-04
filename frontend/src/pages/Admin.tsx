@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DocumentSummary, IndexStatus, IngestionEvent } from '@practica/shared';
+import type {
+  DocumentSummary,
+  IndexStatus,
+  IngestionEvent,
+  RecentError,
+  TopCitedDocument,
+  UsageDaily,
+} from '@practica/shared';
 import { api } from '../api/client';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -13,12 +20,18 @@ export function AdminPage() {
   const [status, setStatus] = useState<IndexStatus | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [events, setEvents] = useState<IngestionEvent[]>([]);
+  const [usage, setUsage] = useState<UsageDaily[]>([]);
+  const [topCited, setTopCited] = useState<TopCitedDocument[]>([]);
+  const [errors, setErrors] = useState<RecentError[]>([]);
   const [reindexing, setReindexing] = useState(false);
 
   const refresh = useCallback(() => {
     api.getStatus().then(setStatus).catch(() => {});
     api.getDocuments().then(setDocuments).catch(() => {});
     api.getEvents(100).then(setEvents).catch(() => {});
+    api.getStatsUsage(30).then((r) => setUsage(r.daily)).catch(() => {});
+    api.getStatsTopCited(10).then((r) => setTopCited(r.documents)).catch(() => {});
+    api.getStatsErrors(20).then((r) => setErrors(r.errors)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -113,6 +126,79 @@ export function AdminPage() {
             </div>
           ))}
           {events.length === 0 && <div className="muted">Niciun eveniment încă.</div>}
+        </div>
+      </section>
+
+      <section>
+        <h2>Utilizare (ultimele 30 zile)</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Zi</th>
+              <th>Conversații</th>
+              <th>Mesaje</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usage.map((u) => (
+              <tr key={u.day}>
+                <td>{new Date(u.day).toLocaleDateString('ro-RO')}</td>
+                <td>{u.conversations}</td>
+                <td>{u.messages}</td>
+              </tr>
+            ))}
+            {usage.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">
+                  Nicio conversație în ultimele 30 de zile.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Top documente citate</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Document</th>
+              <th>Citări</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topCited.map((d) => (
+              <tr key={d.document_id}>
+                <td title={d.rel_path}>{d.title || d.rel_path}</td>
+                <td>{d.citation_count}</td>
+              </tr>
+            ))}
+            {topCited.length === 0 && (
+              <tr>
+                <td colSpan={2} className="muted">
+                  Încă nu există citări în răspunsuri.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Erori recente (ingestie)</h2>
+        <div className="event-log">
+          {errors.map((e) => (
+            <div key={e.id} className="event event-error">
+              <span className="event-time">{new Date(e.createdAt).toLocaleString('ro-RO')}</span>
+              <span className="event-stage">{e.stage}</span>
+              <span className="event-message">
+                {e.relPath ? `[${e.relPath}] ` : ''}
+                {e.message}
+              </span>
+            </div>
+          ))}
+          {errors.length === 0 && <div className="muted">Nicio eroare recentă. 👍</div>}
         </div>
       </section>
     </div>

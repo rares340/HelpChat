@@ -70,6 +70,53 @@ export interface ToolInvocation {
   output: unknown;
 }
 
+// === Statistici (consumate de Admin.tsx) ===
+
+export interface DocumentStats {
+  active: number;
+  indexing: number;
+  failed: number;
+  deleted: number;
+  total: number;
+}
+
+export interface UsageDaily {
+  day: string;
+  conversations: number;
+  messages: number;
+}
+
+export interface UsageStats {
+  days: number;
+  daily: UsageDaily[];
+}
+
+export interface RecentError {
+  id: number;
+  level: 'info' | 'warn' | 'error';
+  stage: string;
+  relPath: string | null;
+  message: string;
+  createdAt: string;
+}
+
+export interface RecentErrors {
+  count: number;
+  errors: RecentError[];
+}
+
+export interface TopCitedDocument {
+  document_id: number;
+  rel_path: string;
+  title: string;
+  citation_count: number;
+}
+
+export interface TopCited {
+  count: number;
+  documents: TopCitedDocument[];
+}
+
 /** Evenimente SSE trimise de /api/chat */
 export type ChatStreamEvent =
   | { type: 'conversation'; conversationId: number }

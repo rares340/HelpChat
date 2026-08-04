@@ -11,11 +11,11 @@ export interface ToolDef<Args = unknown> {
 /** Lista albă de tool-uri. Modelul nu poate invoca nimic în afara a ce e aici. */
 const tools: ToolDef[] = [];
 
-export function registerTool(tool: ToolDef): void {
+export function registerTool<Args>(tool: ToolDef<Args>): void {
   if (tools.some((t) => t.name === tool.name)) {
     throw new Error(`Tool MCP duplicat: ${tool.name}`);
   }
-  tools.push(tool);
+  tools.push(tool as unknown as ToolDef);
 }
 
 /** Conversie la formatul cerut de MCP (și, mai departe, de Ollama). */

@@ -9,7 +9,7 @@ registerTool({
   name: 'ping',
   description: 'Verifică că serverul MCP răspunde. Returnează pong=true și ecoul mesajului trimis.',
   inputSchema: argsSchema,
-  handler: ({ msg }) => ({
+  handler: async ({ msg }) => ({
     pong: true,
     echo: msg ?? null,
     ts: new Date().toISOString(),
