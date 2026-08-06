@@ -46,6 +46,14 @@ describe('selectFormIds', () => {
   it('listare facturi → fără formular (doar tool-uri de citire)', () => {
     expect(selectFormIds('Ce facturi am de plătit?')).toEqual([]);
   });
+
+  it('întrebare despre un partener existent → fără formular de partener nou', () => {
+    expect(selectFormIds('Care e soldul partenerului Alfa?')).not.toContain('add_partner');
+  });
+
+  it('fă factură la partenerul X → doar create_invoice, fără add_partner', () => {
+    expect(selectFormIds('Fă o factură la partenerul Alfa')).toEqual(['create_invoice']);
+  });
 });
 
 describe('getChatForm', () => {
@@ -64,6 +72,16 @@ describe('getChatForm', () => {
   it('pre-umple totalul din mesaj („de 200 lei")', () => {
     const form = getChatForm('create_invoice', 'Creează o factură de 200 lei pentru Alpha');
     expect(form.fields.find((f) => f.name === 'total_amount')?.value).toBe(200);
+  });
+
+  it('pre-umple partenerul din mesaj („firma Alfa")', () => {
+    const form = getChatForm('create_invoice', 'Fă o factură la firma Alfa SRL');
+    expect(form.fields.find((f) => f.name === 'partner')?.value).toBe('Alfa SRL');
+  });
+
+  it('pre-umple denumirea la partener nou din mesaj', () => {
+    const form = getChatForm('add_partner', 'Adaugă partenerul Beta SRL');
+    expect(form.fields.find((f) => f.name === 'name')?.value).toBe('Beta SRL');
   });
 
   it('cele trei formulare au butoane de submit diferite', () => {

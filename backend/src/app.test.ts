@@ -93,6 +93,8 @@ describe('API', () => {
         yield { content: 'Balanța pe luna curentă este echilibrată.' };
       });
 
+    const callsBefore = vi.mocked(chatStream).mock.calls.length;
+
     const res = await app.inject({
       method: 'POST',
       url: '/api/chat',
@@ -105,6 +107,18 @@ describe('API', () => {
       .filter((b) => b.startsWith('data: '))
       .map((b) => JSON.parse(b.slice(6)));
 
+    const calls = vi.mocked(chatStream).mock.calls.slice(callsBefore);
+    // Rutarea DB a trimis tool-urile relevante modelului (fix ramură clasică).
+    expect(calls[0][1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: 'get_balance' }) })])
+    );
+    // Și a suprimat fragmentele RAG din contextul user — modelul nu mai poate răspunde din documente.
+    const firstUser = calls[0][0].find((m) => m.role === 'user');
+    expect(String(firstUser?.content)).not.toContain('Fragmente din documente');
+    expect(String(firstUser?.content)).toContain('DATELE aplicației');
+    // Fără surse recuperate pe întrebările de DB.
+    expect(events.some((e) => e.type === 'sources')).toBe(false);
+
     const tool = events.find((e) => e.type === 'tool');
     expect(tool).toBeDefined();
     expect(tool.name).toBe('get_balance');
@@ -115,7 +129,7 @@ describe('API', () => {
     );
 
     // Al doilea apel către model primește rezultatul tool-ului ca mesaj role "tool".
-    const secondCallMessages = vi.mocked(chatStream).mock.calls[vi.mocked(chatStream).mock.calls.length - 1][0];
+    const secondCallMessages = calls[calls.length - 1][0];
     const toolMessage = secondCallMessages.find((m) => m.role === 'tool');
     expect(toolMessage).toBeDefined();
     expect(toolMessage?.tool_name).toBe('get_balance');
@@ -129,6 +143,56 @@ describe('API', () => {
     const messages = await app.inject({ method: 'GET', url: `/api/conversations/${conversationId}/messages` });
     // Mesajele intermediare (assistant cu tool_calls, tool) nu se persistă.
     expect(messages.json()).toHaveLength(2);
+    await app.inject({ method: 'DELETE', url: `/api/conversations/${conversationId}` });
+  });
+
+  it('întrebare despre documente: primește fragmente și fără tool-uri', async () => {
+    const callsBefore = vi.mocked(chatStream).mock.calls.length;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: { question: 'Cum adaug un produs în aplicație?' },
+    });
+    expect(res.statusCode).toBe(200);
+    const events = res.body
+      .split('\n\n')
+      .filter((b) => b.startsWith('data: '))
+      .map((b) => JSON.parse(b.slice(6)));
+
+    const calls = vi.mocked(chatStream).mock.calls.slice(callsBefore);
+    // Întrebarea despre documente păstrează contextul RAG — nu directiva DB.
+    const firstUser = calls[0][0].find((m) => m.role === 'user');
+    expect(String(firstUser?.content)).toMatch(/Fragmente din documente|nu a fost găsit niciun fragment/i);
+    expect(String(firstUser?.content)).not.toContain('DATELE aplicației');
+    // Fără tool-uri trimise modelului pentru întrebări de document.
+    expect(calls[0][1]).toHaveLength(0);
+
+    const conversationId = events.find((e) => e.type === 'conversation').conversationId as number;
+    await app.inject({ method: 'DELETE', url: `/api/conversations/${conversationId}` });
+  });
+
+  it('creare prin formular: tool-ul de mutare nu e trimis modelului', async () => {
+    const callsBefore = vi.mocked(chatStream).mock.calls.length;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: { question: 'Fă o factură la partenerul Alfa' },
+    });
+    expect(res.statusCode).toBe(200);
+    const events = res.body
+      .split('\n\n')
+      .filter((b) => b.startsWith('data: '))
+      .map((b) => JSON.parse(b.slice(6)));
+    // Formularul de factură e deschis — calea deterministică de creare.
+    const formIds = events.filter((e) => e.type === 'form').map((e) => e.form.id);
+    expect(formIds).toContain('create_invoice');
+    // Tool-ul de mutare corespunzător NU e trimis modelului — nu poate crea pe lângă formular.
+    const calls = vi.mocked(chatStream).mock.calls.slice(callsBefore);
+    const passedToolNames = (calls[0][1] ?? []).map((t) => t.function.name);
+    expect(passedToolNames).not.toContain('create_invoice');
+    expect(passedToolNames).not.toContain('add_partner');
+
+    const conversationId = events.find((e) => e.type === 'conversation').conversationId as number;
     await app.inject({ method: 'DELETE', url: `/api/conversations/${conversationId}` });
   });
 

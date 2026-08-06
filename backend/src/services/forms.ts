@@ -57,13 +57,31 @@ function extractAmount(question: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Extrage numele unui partener menționat în întrebare („partenerul Alfa", „firma X",
+ *  „clientul Y"). Necesită un cuvânt-marcă, ca să nu capturăm substantive comune. */
+const PARTNER_REF_RE =
+  /(?:partenerului|partenerul|partenera|firmei|firma|clientului|clientul|clienta|furnizorului|furnizorul|societatea|societatii)\s+([A-Za-z0-9ăâîșţțŞşĂÂÎȘȚ.'&/\s-]*)/i;
+const PARTNER_REF_STOP = /\s+(?:ca|cu|pentru|din|pe|la|in|si|sau|de|care|are|furnizor|client|partener)\b|\s+\d/i;
+
+function extractPartnerRef(question: string): string | undefined {
+  const m = question.match(PARTNER_REF_RE);
+  if (!m) return undefined;
+  const name = m[1].split(PARTNER_REF_STOP)[0].trim();
+  return name || undefined;
+}
+
 function buildInvoiceForm(question: string): ChatForm {
+  const partner = extractPartnerRef(question);
   return {
     id: 'create_invoice',
     title: 'Factură nouă',
     submitLabel: 'Creează factura',
     fields: [
-      f('partner', 'Partener', 'text', { required: true, placeholder: 'Nume sau CUI' }),
+      f('partner', 'Partener', 'text', {
+        required: true,
+        placeholder: 'Nume sau CUI',
+        ...(partner ? { value: partner } : {}),
+      }),
       f('direction', 'Direcție', 'select', { required: true, options: DIRECTION_OPTS, value: 'issued' }),
       f('series', 'Serie', 'text', { required: true, placeholder: 'ex. INV' }),
       f('number', 'Număr', 'text', { required: true, placeholder: 'ex. 2026-0001' }),
@@ -83,13 +101,14 @@ function buildInvoiceForm(question: string): ChatForm {
   };
 }
 
-function buildPartnerForm(): ChatForm {
+function buildPartnerForm(question = ''): ChatForm {
+  const name = extractPartnerRef(question);
   return {
     id: 'add_partner',
     title: 'Partener nou',
     submitLabel: 'Adaugă partenerul',
     fields: [
-      f('name', 'Denumire', 'text', { required: true }),
+      f('name', 'Denumire', 'text', { required: true, ...(name ? { value: name } : {}) }),
       f('cui', 'CUI', 'text', { required: true, placeholder: 'cu sau fără RO' }),
       f('is_client', 'Client (îi emitem facturi)', 'boolean'),
       f('is_supplier', 'Furnizor (primim facturi de la el)', 'boolean'),
@@ -135,7 +154,7 @@ export function getChatForm(id: ChatForm['id'], question = ''): ChatForm {
     case 'create_invoice':
       return buildInvoiceForm(question);
     case 'add_partner':
-      return buildPartnerForm();
+      return buildPartnerForm(question);
     case 'register_payment':
       return buildPaymentForm();
   }

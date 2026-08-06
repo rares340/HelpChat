@@ -1,11 +1,17 @@
-import type { ChatStreamEvent, Citation } from '@practica/shared';
+import type { ChatForm, ChatStreamEvent, Citation } from '@practica/shared';
 import { config } from '../config.js';
 import { pool } from '../db/pool.js';
-import { chatStream, chatWithTools, type OllamaChatMessage, type OllamaToolCall } from './ollama.js';
-import { executeFacturiTool, facturiToolLabel } from './facturi/tools.js';
+import {
+  chatStream,
+  chatWithTools,
+  type OllamaChatMessage,
+  type OllamaToolCall,
+  type OllamaToolDefinition,
+} from './ollama.js';
+import { executeFacturiTool, facturiToolDefs, facturiToolLabel } from './facturi/tools.js';
 import { hybridSearch, type RetrievedChunk } from './retrieval.js';
 import { callMcpTool, getOllamaToolsFor, isMcpReady } from './mcpClient.js';
-import { selectToolNames } from './toolRouting.js';
+import { isDbDataQuery, selectToolNames } from './toolRouting.js';
 import { getChatForm, selectFormIds } from './forms.js';
 import { buildTopicInventory, generateFollowUps } from './suggestions.js';
 
@@ -13,6 +19,11 @@ const HISTORY_MESSAGES = 6;
 const SNIPPET_MAX_CHARS = 400;
 /** Limita buclei agentice: câte runde de tool-uri acceptăm pentru o întrebare. */
 const TOOL_MAX_ITERATIONS = 5;
+
+/** Îndemn dat modelului când o întrebare de DB a rămas fără niciun apel de tool. */
+const DB_TOOL_NUDGE =
+  'Răspunsul anterior nu a apelat niciun tool, dar aceasta este o întrebare despre datele aplicației. ' +
+  'Răspunde DOAR apelând unul dintre tool-urile disponibile; nu răspunde din documente sau din memorie.';
 
 /** Unele modele (chiar și cu `think: false`) emit totuși un bloc `think…/think`
  *  în `content` înainte de răspunsul propriu-zis. Îl tăiem înainte de streaming
@@ -139,11 +150,12 @@ async function getHistory(conversationId: number): Promise<OllamaChatMessage[]> 
  */
 async function* streamWithThinkStrip(
   messages: OllamaChatMessage[],
+  tools: OllamaToolDefinition[],
   onToolCalls?: (calls: OllamaToolCall[]) => void
 ): AsyncGenerator<string> {
   let thinkOpen = false;
   let buffer = '';
-  for await (const delta of chatStream(messages)) {
+  for await (const delta of chatStream(messages, tools)) {
     if (delta.toolCalls?.length) onToolCalls?.(delta.toolCalls);
     if (!delta.content) continue;
     const token = delta.content;
@@ -166,6 +178,27 @@ async function* streamWithThinkStrip(
 }
 
 /**
+ * Procesează apelurile de tool dintr-o rundă MCP: le anunță utilizatorului,
+ * le execută prin server și le adaugă în istoric. Emite evenimente ChatStreamEvent.
+ */
+async function* processMcpToolCalls(
+  toolCalls: OllamaToolCall[],
+  messages: OllamaChatMessage[]
+): AsyncGenerator<ChatStreamEvent> {
+  for (const tc of toolCalls) {
+    yield { type: 'tool_call', name: tc.function.name, args: tc.function.arguments };
+    let output: unknown;
+    try {
+      output = await callMcpTool(tc.function.name, tc.function.arguments);
+    } catch (err) {
+      output = { error: (err as Error).message };
+    }
+    yield { type: 'tool_result', name: tc.function.name, output };
+    messages.push({ role: 'tool', content: JSON.stringify(output), tool_call_id: tc.id, name: tc.function.name });
+  }
+}
+
+/**
  * Fluxul complet al unei întrebări: persistă întrebarea, recuperează fragmente,
  * generează răspunsul (cu sau fără tool-use prin MCP) și persistă mesajul
  * asistentului cu citări.
@@ -180,11 +213,28 @@ export async function* answerQuestion(conversationId: number, question: string):
   ]);
   await pool.query(`UPDATE conversations SET updated_at = now() WHERE id = $1`, [conversationId]);
 
-  const [chunks, topicInventory] = await Promise.all([
-    hybridSearch(buildSearchQuery(history, question)),
-    buildTopicInventory(),
-  ]);
-  yield { type: 'sources', citations: toCitations(chunks) };
+  // Întrebările despre datele din baza de date se rutează determinist către
+  // tool-uri: nu căutăm fragmente, ca modelul să nu poată alege RAG în loc de
+  // datele reale (vezi isDbDataQuery în toolRouting.ts). Suprimăm fragmentele
+  // DOAR dacă avem un tool de trimis pe ramura curentă — altfel modelul ar
+  // rămâne fără nicio sursă.
+  const isDbQuery = isDbDataQuery(question);
+  // Tool-urile de mutare pentru care am deschis deja un formular (create_invoice,
+  // add_partner, register_payment) NU se trimit modelului ca apelabile: le-ar putea
+  // executa direct, inventând date (ex. CUI), în loc să lase formularul deterministic
+  // să facă crearea. Modelul doar explică; formularul face.
+  const formToolIds = new Set<ChatForm['id']>(selectFormIds(question));
+  const toolNames = selectToolNames(question).filter((t) => !formToolIds.has(t as ChatForm['id']));
+  // Ramura clasică poate rula doar tool-urile de facturi; statisticile de index
+  // (get_document_stats etc.) există doar prin MCP.
+  const classicTools = facturiToolDefs.filter((t) => toolNames.includes(t.function.name));
+  const toolsAvailable = isMcpReady() ? toolNames.length > 0 : classicTools.length > 0;
+  const suppressRag = isDbQuery && toolsAvailable;
+
+  const [chunks, topicInventory] = suppressRag
+    ? [ [] as RetrievedChunk[], await buildTopicInventory() ]
+    : await Promise.all([hybridSearch(buildSearchQuery(history, question)), buildTopicInventory()]);
+  if (!suppressRag) yield { type: 'sources', citations: toCitations(chunks) };
 
   // La cereri de creare (factură, partener, plată) — inclusiv „cum fac…?” —
   // deschidem formulare dinamice editabile în chat, înainte de răspuns.
@@ -192,9 +242,12 @@ export async function* answerQuestion(conversationId: number, question: string):
     yield { type: 'form', form: getChatForm(id, question) };
   }
 
-  const contextBlock = chunks.length
-    ? `Fragmente din documente:\n\n${buildContextBlock(chunks)}`
-    : 'Nu a fost găsit niciun fragment relevant în documentele indexate.';
+  const contextBlock = suppressRag
+    ? 'Întrebare despre DATELE aplicației (facturi, plăți, parteneri, statistici) — nu s-au căutat documente. ' +
+      'Rezolv-o EXCLUSIV apelând un tool disponibil; nu răspunde din documente sau din cunoștințe proprii.'
+    : chunks.length
+      ? `Fragmente din documente:\n\n${buildContextBlock(chunks)}`
+      : 'Nu a fost găsit niciun fragment relevant în documentele indexate.';
 
   const messages: OllamaChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -217,7 +270,7 @@ export async function* answerQuestion(conversationId: number, question: string):
     // NU se persistă.
     // Trimitem DOAR câteva tool-uri relevante pentru întrebare: modelul de chat
     // (qwen2.5:7b) se blochează sau alege prost dacă primește toate cele 17.
-    const tools = getOllamaToolsFor(selectToolNames(question));
+    const tools = getOllamaToolsFor(toolNames);
     for (let i = 0; i < config.MCP_MAX_ITERATIONS; i++) {
       const result = await chatWithTools(messages, tools);
       if (!result.tool_calls || result.tool_calls.length === 0) {
@@ -229,21 +282,25 @@ export async function* answerQuestion(conversationId: number, question: string):
       }
       usedTools = true;
       messages.push({ role: 'assistant', content: result.content });
-      for (const tc of result.tool_calls) {
-        yield { type: 'tool_call', name: tc.function.name, args: tc.function.arguments };
-        let output: unknown;
-        try {
-          output = await callMcpTool(tc.function.name, tc.function.arguments);
-        } catch (err) {
-          output = { error: (err as Error).message };
+      for await (const ev of processMcpToolCalls(result.tool_calls, messages)) yield ev;
+    }
+    // Întrebările de DB nu au fragmente de unde să răspundă: dacă modelul tot
+    // nu a apelat un tool, îl îndemnăm o dată înainte să acceptăm răspunsul.
+    if (suppressRag && !usedTools) {
+      messages.push({ role: 'user', content: DB_TOOL_NUDGE });
+      const result = await chatWithTools(messages, tools);
+      if (result.tool_calls?.length) {
+        usedTools = true;
+        messages.push({ role: 'assistant', content: result.content });
+        for await (const ev of processMcpToolCalls(result.tool_calls, messages)) yield ev;
+        const final = await chatWithTools(messages, tools);
+        if (final.content) {
+          answer = final.content;
+          yield { type: 'token', content: final.content };
         }
-        yield { type: 'tool_result', name: tc.function.name, output };
-        messages.push({
-          role: 'tool',
-          content: JSON.stringify(output),
-          tool_call_id: tc.id,
-          name: tc.function.name,
-        });
+      } else if (result.content) {
+        answer = result.content;
+        yield { type: 'token', content: result.content };
       }
     }
     answer = stripThinking(answer);
@@ -254,16 +311,45 @@ export async function* answerQuestion(conversationId: number, question: string):
     // și reia cu rezultatele în istoric — buclă agentică, ca în ramura MCP.
     for (let i = 0; i < TOOL_MAX_ITERATIONS; i++) {
       let toolCalls: OllamaToolCall[] | undefined;
-      for await (const token of streamWithThinkStrip(messages, (calls) => (toolCalls = calls))) {
+      let roundText = '';
+      for await (const token of streamWithThinkStrip(messages, classicTools, (calls) => (toolCalls = calls))) {
+        roundText += token;
         answer += token;
         yield { type: 'token', content: token };
       }
       if (!toolCalls || toolCalls.length === 0) break;
       usedTools = true;
+      // Ecou al mesajului assistant cu tool_calls — protocolul Ollama îl cere
+      // înainte de mesajele role "tool".
+      messages.push({ role: 'assistant', content: roundText, tool_calls: toolCalls });
       for (const tc of toolCalls) {
         yield { type: 'tool', name: tc.function.name, summary: facturiToolLabel(tc.function.name) };
         const output = await executeFacturiTool(tc.function.name, tc.function.arguments);
         messages.push({ role: 'tool', content: output, tool_name: tc.function.name });
+      }
+    }
+    if (suppressRag && !usedTools) {
+      messages.push({ role: 'user', content: DB_TOOL_NUDGE });
+      let toolCalls: OllamaToolCall[] | undefined;
+      let roundText = '';
+      for await (const token of streamWithThinkStrip(messages, classicTools, (calls) => (toolCalls = calls))) {
+        roundText += token;
+        answer += token;
+        yield { type: 'token', content: token };
+      }
+      if (toolCalls?.length) {
+        usedTools = true;
+        messages.push({ role: 'assistant', content: roundText, tool_calls: toolCalls });
+        for (const tc of toolCalls) {
+          yield { type: 'tool', name: tc.function.name, summary: facturiToolLabel(tc.function.name) };
+          const output = await executeFacturiTool(tc.function.name, tc.function.arguments);
+          messages.push({ role: 'tool', content: output, tool_name: tc.function.name });
+        }
+        // Răspunsul final, pe baza rezultatelor tool-ului.
+        for await (const token of streamWithThinkStrip(messages, classicTools)) {
+          answer += token;
+          yield { type: 'token', content: token };
+        }
       }
     }
     answer = stripThinking(answer);
