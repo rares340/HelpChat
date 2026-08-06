@@ -565,3 +565,23 @@ export async function executeFacturiTool(name: string, rawArgs: unknown): Promis
     return JSON.stringify({ error: (err as Error).message });
   }
 }
+
+/**
+ * Execută un tool și întoarce rezultatul ca obiect validat (nu șir JSON).
+ * Folosit de endpoint-ul de formulare, unde trebuie structura (needs_info etc.)
+ * și mesajele de eroare clare. `needs_info` de la tool-uri revine neschimbat.
+ */
+export async function executeToolObject(name: string, rawArgs: unknown): Promise<unknown> {
+  const tool = TOOLS[name];
+  if (!tool) throw new Error(`Formular necunoscut: "${name}".`);
+  try {
+    const args = tool.schema.parse(dropEmptyArgs(rawArgs ?? {}));
+    return await tool.run(args as never);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const issues = err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('; ');
+      throw new Error(`Câmpuri invalide: ${issues}`);
+    }
+    throw err;
+  }
+}

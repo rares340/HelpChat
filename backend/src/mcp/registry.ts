@@ -5,6 +5,12 @@ export interface ToolDef<Args = unknown> {
   name: string;
   description: string;
   inputSchema: z.ZodType<Args>;
+  /**
+   * JSON Schema complet (properties, enum, required) — când există, se trimite
+   * modelului ca atare, în loc de simplificarea din inputSchema (care știe doar
+   * string/number). Folosit de tool-urile de facturi, care au definiții bogate.
+   */
+  jsonSchema?: Record<string, unknown>;
   handler: (args: Args) => Promise<unknown>;
 }
 
@@ -21,6 +27,9 @@ export function registerTool<Args>(tool: ToolDef<Args>): void {
 /** Conversie la formatul cerut de MCP (și, mai departe, de Ollama). */
 export function listToolsForMcp() {
   return tools.map((t) => {
+    if (t.jsonSchema) {
+      return { name: t.name, description: t.description, inputSchema: t.jsonSchema };
+    }
     const shape = (t.inputSchema as unknown as { _def?: { shape?: Record<string, unknown> } })._def?.shape;
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
@@ -49,6 +58,12 @@ export function listToolsForMcp() {
 /** Returnează definiția Ollama-compatibilă (folosită de client pt. câmpul `tools`). */
 export function listToolsForOllama() {
   return tools.map((t) => {
+    if (t.jsonSchema) {
+      return {
+        type: 'function' as const,
+        function: { name: t.name, description: t.description, parameters: t.jsonSchema },
+      };
+    }
     const shape = (t.inputSchema as unknown as { _def?: { shape?: Record<string, unknown> } })._def?.shape;
     const properties: Record<string, { type: string; description?: string }> = {};
     const required: string[] = [];

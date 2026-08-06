@@ -11,6 +11,7 @@ import { healthCheck } from './services/health.js';
 import { answerQuestion } from './services/chat.js';
 import { indexerStatus, scanAll } from './services/indexer.js';
 import { getStarterSuggestions } from './services/suggestions.js';
+import { executeFormTool, FORM_TOOL_IDS } from './services/forms.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -234,6 +235,43 @@ export async function buildServer(): Promise<FastifyInstance> {
     reply.raw.end();
     return reply;
   });
+
+  // === Formulare dinamice (submit determinist, fără LLM) ===
+  // Deschise prin evenimentul `form` din /api/chat; aici se validează și se
+  // salvează direct (create_invoice / add_partner / register_payment).
+
+  app.post<{ Params: { formId: string }; Body: { conversationId?: number; values?: Record<string, unknown> } }>(
+    '/api/forms/:formId',
+    async (req, reply) => {
+      const { formId } = req.params;
+      if (!FORM_TOOL_IDS.includes(formId as (typeof FORM_TOOL_IDS)[number])) {
+        return reply.code(404).send({ ok: false, error: `Formular necunoscut: ${formId}.` });
+      }
+      let result: unknown;
+      try {
+        result = await executeFormTool(formId as (typeof FORM_TOOL_IDS)[number], req.body?.values ?? {});
+      } catch (err) {
+        return reply.code(400).send({ ok: false, error: (err as Error).message });
+      }
+      const rec = result as { needs_info?: boolean; message?: string; summary?: string };
+      if (rec.needs_info) {
+        return reply.code(400).send({
+          ok: false,
+          error: rec.message ?? 'Date incomplete.',
+          ...(result as Record<string, unknown>),
+        });
+      }
+      const summary = rec.summary ?? 'Operație reușită.';
+      const conversationId = req.body?.conversationId;
+      if (conversationId) {
+        await pool.query(`INSERT INTO messages (conversation_id, role, content) VALUES ($1, 'assistant', $2)`, [
+          conversationId,
+          summary,
+        ]);
+      }
+      return { ok: true, message: summary, data: result };
+    }
+  );
 
   return app;
 }

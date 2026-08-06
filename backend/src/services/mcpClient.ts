@@ -57,6 +57,28 @@ export function getOllamaTools(): Array<{
   }));
 }
 
+/**
+ * Variantă cu filtru: doar tool-urile ale căror nume apar în `names`.
+ * Folosit de bucla MCP cu selectToolNames() — modelul primește doar câteva
+ * tool-uri relevante (qwen2.5:7b se blochează cu toate cele 17).
+ */
+export function getOllamaToolsFor(names: string[]): Array<{
+  type: 'function';
+  function: { name: string; description: string; parameters: unknown };
+}> {
+  const wanted = new Set(names);
+  return toolsCache
+    .filter((t) => wanted.has(t.name))
+    .map((t) => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      },
+    }));
+}
+
 /** Apelează un tool și returnează output-ul parsat. Throw dacă clientul nu e pornit. */
 export async function callMcpTool(name: string, args: unknown): Promise<unknown> {
   if (!client) throw new Error('MCP client nu este pornit (MCP_ENABLED=false?)');

@@ -33,6 +33,17 @@ export const api = {
   getStatsErrors: (limit = 20) => getJson<RecentErrors>(`/api/stats/errors?limit=${limit}`),
   getStatsTopCited: (limit = 10) => getJson<TopCited>(`/api/stats/top-cited?limit=${limit}`),
   getSuggestions: () => getJson<StarterSuggestions>('/api/suggestions'),
+  /** Trimite datele unui formular dinamic (ex. creare factură); returnează { ok, message, data } sau { ok:false, error }. */
+  submitForm: async (formId: string, values: Record<string, unknown>, conversationId: number | null) => {
+    const res = await fetch(`/api/forms/${formId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values, conversationId: conversationId ?? undefined }),
+    });
+    const body = await res.json().catch(() => ({ error: `Răspuns invalid (${res.status})` }));
+    if (!res.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    return body as { ok: true; message: string; data: unknown };
+  },
 };
 
 /**

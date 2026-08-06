@@ -80,6 +80,31 @@ export interface ToolInvocation {
   output: unknown;
 }
 
+// === Formulare dinamice (randate editabil în chat) ===
+
+/** Un câmp dintr-un formular deschis dinamic de asistent. */
+export interface FormField {
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select' | 'textarea' | 'boolean';
+  required?: boolean;
+  /** Opțiuni pentru `select` (valoare de submit + etichetă afișată). */
+  options?: Array<{ value: string; label: string }>;
+  placeholder?: string;
+  /** Valoare pre-umplută (default sau extrasă din mesaj). */
+  value?: string | number | boolean;
+  /** Hint afișat sub câmp. */
+  description?: string;
+}
+
+/** Definiția unui formular deschis în chat (ex. „Factură nouă”). */
+export interface ChatForm {
+  id: 'create_invoice' | 'add_partner' | 'register_payment';
+  title: string;
+  submitLabel: string;
+  fields: FormField[];
+}
+
 // === Statistici (consumate de Admin.tsx) ===
 
 export interface DocumentStats {
@@ -136,6 +161,8 @@ export type ChatStreamEvent =
   | { type: 'token'; content: string }
   /** Modelul execută un tool de facturi (ex. "Consult facturile de plătit"). */
   | { type: 'tool'; name: string; summary: string }
+  /** Formular dinamic deschis de asistent (ex. creare factură), randat editabil. */
+  | { type: 'form'; form: ChatForm }
   | { type: 'done'; messageId: number; citations: Citation[] }
   /** Continuări propuse, emise după `done`. */
   | { type: 'suggestions'; messageId: number; items: string[] }

@@ -87,7 +87,7 @@ describe('API', () => {
     // Runda 1: modelul cere un tool; runda 2: răspunsul final.
     vi.mocked(chatStream)
       .mockImplementationOnce(async function* () {
-        yield { toolCalls: [{ function: { name: 'get_balance', arguments: { period: 'current_month' } } }] };
+        yield { toolCalls: [{ id: 'call_1', function: { name: 'get_balance', arguments: { period: 'current_month' } } }] };
       })
       .mockImplementationOnce(async function* () {
         yield { content: 'Balanța pe luna curentă este echilibrată.' };
@@ -177,5 +177,85 @@ describe('API', () => {
     const body = res.json();
     expect(body.documents).toHaveProperty('active');
     expect(typeof body.chunks).toBe('number');
+  });
+
+  it('POST /api/forms/:formId necunoscut → 404', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/forms/nope', payload: { values: {} } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().ok).toBe(false);
+  });
+
+  it('POST /api/forms/add_partner fără tip → 400 cu needs_info', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/forms/add_partner',
+      payload: { values: { name: 'X', cui: '999999999' } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().needs_info).toBe(true);
+  });
+
+  it('POST /api/forms: creează partener + factură direct (fără LLM) și persistă confirmarea', async () => {
+    const cui = String(Date.now() + 2_000_000).slice(-9); // CUI valid: doar cifre, offset distinct de alte fișiere
+    const series = 'FRM';
+    const number = `F-${Date.now()}`;
+    const conversationId = (await pool.query(
+      `INSERT INTO conversations (title) VALUES ('form-test') RETURNING id`
+    )).rows[0].id as number;
+    try {
+      const addRes = await app.inject({
+        method: 'POST',
+        url: '/api/forms/add_partner',
+        payload: { values: { name: `Firma ${cui}`, cui, is_client: true }, conversationId },
+      });
+      expect(addRes.statusCode).toBe(200);
+      expect(addRes.json().ok).toBe(true);
+      expect(addRes.json().message).toMatch(/Partener adăugat/i);
+
+      const invRes = await app.inject({
+        method: 'POST',
+        url: '/api/forms/create_invoice',
+        payload: {
+          values: { partner: cui, direction: 'issued', series, number, issue_date: '2026-08-01', due_date: '2026-08-31', net_amount: 100, vat_rate: 19 },
+          conversationId,
+        },
+      });
+      expect(invRes.statusCode).toBe(200);
+      expect(invRes.json().ok).toBe(true);
+      expect(invRes.json().message).toMatch(/Factură emisă către/);
+      expect(invRes.json().data.invoice.id).toBeGreaterThan(0);
+
+      // Confirmarea a fost persistată ca mesaj asistent în conversație.
+      const messages = await app.inject({ method: 'GET', url: `/api/conversations/${conversationId}/messages` });
+      const persisted = messages.json() as Array<{ role: string; content: string }>;
+      expect(persisted.some((m) => m.role === 'assistant' && /Factură emisă/.test(m.content))).toBe(true);
+    } finally {
+      await pool.query(`DELETE FROM facturi.invoices WHERE partner_id IN (SELECT id FROM facturi.partners WHERE cui = $1)`, [cui]);
+      await pool.query(`DELETE FROM facturi.partners WHERE cui = $1`, [cui]);
+      await pool.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+    }
+  });
+
+  it('POST /api/chat cu cerere de creare → emite eveniment form pre-umplut', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/chat',
+      payload: { question: 'Creează o factură de 200 lei pentru firma Alpha' },
+    });
+    expect(res.statusCode).toBe(200);
+    const events = res.body
+      .split('\n\n')
+      .filter((b) => b.startsWith('data: '))
+      .map((b) => JSON.parse(b.slice(6)));
+    const forms = events.filter((e) => e.type === 'form').map((e) => e.form) as Array<{
+      id: string;
+      fields: Array<{ name: string; value?: string | number | boolean }>;
+    }>;
+    expect(forms.map((f) => f.id)).toContain('create_invoice');
+    const invoice = forms.find((f) => f.id === 'create_invoice');
+    expect(invoice!.fields.find((x) => x.name === 'total_amount')?.value).toBe(200);
+
+    const conversationId = events.find((e) => e.type === 'conversation').conversationId as number;
+    await app.inject({ method: 'DELETE', url: `/api/conversations/${conversationId}` });
   });
 });

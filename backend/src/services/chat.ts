@@ -1,9 +1,12 @@
 import type { ChatStreamEvent, Citation } from '@practica/shared';
 import { config } from '../config.js';
 import { pool } from '../db/pool.js';
-import { chatStream, chatWithTools, type OllamaChatMessage } from './ollama.js';
+import { chatStream, chatWithTools, type OllamaChatMessage, type OllamaToolCall } from './ollama.js';
+import { executeFacturiTool, facturiToolLabel } from './facturi/tools.js';
 import { hybridSearch, type RetrievedChunk } from './retrieval.js';
-import { callMcpTool, getOllamaTools, isMcpReady } from './mcpClient.js';
+import { callMcpTool, getOllamaToolsFor, isMcpReady } from './mcpClient.js';
+import { selectToolNames } from './toolRouting.js';
+import { getChatForm, selectFormIds } from './forms.js';
 import { buildTopicInventory, generateFollowUps } from './suggestions.js';
 
 const HISTORY_MESSAGES = 6;
@@ -34,6 +37,7 @@ Reguli obligatorii:
 Aplicația gestionează și facturile, plățile și partenerii firmei. Pentru acestea ai tool-uri dedicate expuse prin serverul MCP, iar regulile 1–3 NU se aplică:
 7. La întrebări sau operații despre facturi, plăți, încasări, parteneri, solduri sau statistici financiare, folosește tool-urile disponibile și răspunde pe baza rezultatelor lor — fără etichete [Sn] și fără refuzul de la regula 3.
 8. Dacă un tool întoarce "needs_info" sau "error", NU inventa date: explică utilizatorului ce lipsește sau ce nu a mers și cere informațiile necesare.
+   NU inventa NICIODATĂ valoarea unui parametru pe care îl cere un tool (ex. partner_id, invoice_id, series, number, cui). Dacă parametrul lipsește, întâi folosește un tool de căutare/listare ca să-l obții; dacă nici așa nu-l afli, întreabă utilizatorul.
 9. Prezintă sumele clar, cu monedă (implicit RON), și menționează scadențele sau statusurile relevante.
 
 Întrebări neclare:
@@ -128,11 +132,21 @@ async function getHistory(conversationId: number): Promise<OllamaChatMessage[]> 
   return rows.reverse().map((r) => ({ role: r.role, content: r.content }));
 }
 
-/** Streaming helper: elimină blocurile think înainte de a emite tokenii. */
-async function* streamWithThinkStrip(messages: OllamaChatMessage[]): AsyncGenerator<string> {
+/**
+ * Streaming helper: elimină blocurile think înainte de a emite tokenii.
+ * `onToolCalls` primește deltele cu apeluri de tool din flux (le folosește bucla
+ * clasică de tool-uri de facturi); conținutul lor se saltă aici.
+ */
+async function* streamWithThinkStrip(
+  messages: OllamaChatMessage[],
+  onToolCalls?: (calls: OllamaToolCall[]) => void
+): AsyncGenerator<string> {
   let thinkOpen = false;
   let buffer = '';
-  for await (const token of chatStream(messages)) {
+  for await (const delta of chatStream(messages)) {
+    if (delta.toolCalls?.length) onToolCalls?.(delta.toolCalls);
+    if (!delta.content) continue;
+    const token = delta.content;
     buffer += token;
     if (thinkOpen && buffer.includes('/think')) {
       const idx = buffer.indexOf('/think') + '/think'.length;
@@ -172,6 +186,12 @@ export async function* answerQuestion(conversationId: number, question: string):
   ]);
   yield { type: 'sources', citations: toCitations(chunks) };
 
+  // La cereri de creare (factură, partener, plată) — inclusiv „cum fac…?” —
+  // deschidem formulare dinamice editabile în chat, înainte de răspuns.
+  for (const id of selectFormIds(question)) {
+    yield { type: 'form', form: getChatForm(id, question) };
+  }
+
   const contextBlock = chunks.length
     ? `Fragmente din documente:\n\n${buildContextBlock(chunks)}`
     : 'Nu a fost găsit niciun fragment relevant în documentele indexate.';
@@ -195,7 +215,9 @@ export async function* answerQuestion(conversationId: number, question: string):
     // Serverul expune toate tool-urile înregistrate (inclusiv facturi);
     // vezi backend/src/mcp/registry.ts. Mesajele assistant/tool intermediare
     // NU se persistă.
-    const tools = getOllamaTools();
+    // Trimitem DOAR câteva tool-uri relevante pentru întrebare: modelul de chat
+    // (qwen2.5:7b) se blochează sau alege prost dacă primește toate cele 17.
+    const tools = getOllamaToolsFor(selectToolNames(question));
     for (let i = 0; i < config.MCP_MAX_ITERATIONS; i++) {
       const result = await chatWithTools(messages, tools);
       if (!result.tool_calls || result.tool_calls.length === 0) {
@@ -226,10 +248,23 @@ export async function* answerQuestion(conversationId: number, question: string):
     }
     answer = stripThinking(answer);
   } else {
-    // === Ramura clasică (streaming) ===
-    for await (const token of streamWithThinkStrip(messages)) {
-      answer += token;
-      yield { type: 'token', content: token };
+    // === Ramura clasică (streaming) cu tool-uri de facturi ===
+    // Fără MCP, tool-urile de facturi se execută direct (executeFacturiTool):
+    // deltele `toolCalls` din flux opresc streaming-ul o rundă, execută tool-urile
+    // și reia cu rezultatele în istoric — buclă agentică, ca în ramura MCP.
+    for (let i = 0; i < TOOL_MAX_ITERATIONS; i++) {
+      let toolCalls: OllamaToolCall[] | undefined;
+      for await (const token of streamWithThinkStrip(messages, (calls) => (toolCalls = calls))) {
+        answer += token;
+        yield { type: 'token', content: token };
+      }
+      if (!toolCalls || toolCalls.length === 0) break;
+      usedTools = true;
+      for (const tc of toolCalls) {
+        yield { type: 'tool', name: tc.function.name, summary: facturiToolLabel(tc.function.name) };
+        const output = await executeFacturiTool(tc.function.name, tc.function.arguments);
+        messages.push({ role: 'tool', content: output, tool_name: tc.function.name });
+      }
     }
     answer = stripThinking(answer);
   }

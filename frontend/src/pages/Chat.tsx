@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { ChatMessage, Citation, Conversation, StarterSuggestions } from '@practica/shared';
+import type { ChatForm, ChatMessage, Citation, Conversation, StarterSuggestions } from '@practica/shared';
 import { api, streamChat } from '../api/client';
+import { FormRenderer } from '../components/FormRenderer';
 
 /** .docx nu are paginare fixă — afișăm doar fișierul. */
 function formatRef(c: Citation): string {
@@ -25,6 +26,8 @@ interface DraftMessage {
   streaming?: boolean;
   /** Tool-uri MCP apelate de model (ex. facturi, statistici). */
   toolCalls?: ToolCall[];
+  /** Formulare dinamice deschise de asistent (ex. creare factură). */
+  forms?: ChatForm[];
 }
 
 export function ChatPage() {
@@ -114,6 +117,8 @@ export function ChatPage() {
           updateLast((m) => ({ ...m, citations: event.citations, streaming: false }));
         } else if (event.type === 'suggestions') {
           updateLast((m) => ({ ...m, suggestions: event.items }));
+        } else if (event.type === 'form') {
+          updateLast((m) => ({ ...m, forms: [...(m.forms ?? []), event.form] }));
         } else if (event.type === 'error') {
           setError(event.message);
           updateLast((m) => ({ ...m, streaming: false }));
@@ -146,7 +151,7 @@ export function ChatPage() {
               <button className="conversation-title" onClick={() => openConversation(c.id)} title={c.title}>
                 {c.title}
               </button>
-              <button className="icon-btn" title="Șterge conversația" onClick={() => removeConversation(id)}>
+              <button className="icon-btn" title="Șterge conversația" onClick={() => removeConversation(c.id)}>
                 ✕
               </button>
             </li>
@@ -187,6 +192,18 @@ export function ChatPage() {
                   <>
                     <ReactMarkdown>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
                     {m.streaming && <span className="cursor">▍</span>}
+                    {m.forms && m.forms.length > 0 && (
+                      <div className="chat-forms">
+                        {m.forms.map((f) => (
+                          <FormRenderer
+                            key={f.id}
+                            form={f}
+                            conversationId={activeId}
+                            onSubmitted={refreshConversations}
+                          />
+                        ))}
+                      </div>
+                    )}
                     {m.toolCalls && m.toolCalls.length > 0 && (
                       <details className="tool-calls">
                         <summary>Am consultat: {m.toolCalls.map((tc) => tc.name).join(', ')}</summary>

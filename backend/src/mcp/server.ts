@@ -11,6 +11,7 @@ import './tools/get_document_stats.js';
 import './tools/get_usage_stats.js';
 import './tools/get_recent_errors.js';
 import './tools/get_top_cited.js';
+import './tools/facturi.js';
 
 const server = new Server(
   { name: 'helpchat-mcp', version: '0.1.0' },
